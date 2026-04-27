@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>即梦AI - 一站式AI创作平台</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;font-family:'Noto Sans SC',sans-serif;font-size:14px;background:#f5f5f7;color:#1a1a1a;overflow:hidden;}
+
+/* ── TOP BANNER ── */
+.top-banner{
+  position:fixed;top:0;left:0;right:0;z-index:200;
+  height:40px;
+  background:linear-gradient(90deg,#b2f0f7 0%,#dff7b2 50%,#f7e8b2 100%);
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  font-size:13px;color:#333;
+}
+.banner-btn{
+  padding:4px 14px;
+  background:#fff;
+  border:none;border-radius:20px;
+  font-size:12px;font-family:inherit;color:#333;
+  cursor:pointer;font-weight:500;
+}
+.banner-close{
+  position:absolute;right:20px;
+  background:none;border:none;cursor:pointer;
+  font-size:18px;color:#666;line-height:1;
+}
+
+/* ── LAYOUT ── */
+.layout{
+  display:flex;
+  height:100vh;
+  padding-top:40px;
+}
+
+/* ── LEFT SIDEBAR ── */
+.sidebar{
+  width:64px;
+  background:#fff;
+  border-right:1px solid #e8e8e8;
+  display:flex;flex-direction:column;align-items:center;
+  padding:14px 0;
+  gap:0;
+  flex-shrink:0;
+  height:100%;
+  overflow:hidden;
+}
+
+.sidebar-logo{
+  width:32px;height:32px;margin-bottom:20px;
+}
+.sidebar-logo svg{width:100%;height:100%;}
+
+.nav-item{
+  display:flex;flex-direction:column;align-items:center;
+  width:100%;padding:10px 0;
+  cursor:pointer;
+  font-size:11px;color:#888;
+  gap:4px;
+  transition:color 0.2s;
+  text-decoration:none;
+}
+.nav-item:hover{color:#0bbcd4;}
+.nav-item.active{color:#0bbcd4;}
+
+.nav-icon{font-size:18px;line-height:1;}
+
+.sidebar-bottom{
+  margin-top:auto;
+  display:flex;flex-direction:column;align-items:center;
+  gap:0;width:100%;
+}
+
+.sidebar-bottom .nav-item{font-size:11px;}
+
+.octo-item{
+  display:flex;flex-direction:column;align-items:center;
+  width:100%;padding:8px 0;cursor:pointer;
+  font-size:11px;color:#888;gap:3px;
+  position:relative;
+}
+.octo-icon{
+  width:30px;height:30px;border-radius:8px;
+  background:#1a1a2e;
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:12px;font-weight:700;
+}
+.octo-beta{
+  position:absolute;top:6px;right:8px;
+  background:#ff6b35;color:#fff;font-size:8px;
+  padding:1px 4px;border-radius:3px;
+}
+
+/* ── MAIN CONTENT ── */
+.main{
+  flex:1;
+  overflow-y:auto;
+  background:#f5f5f7;
+  display:flex;flex-direction:column;
+}
+
+/* ── HERO AREA ── */
+.hero{
+  padding:40px 60px 24px;
+  text-align:center;
+  background:linear-gradient(180deg,#eaf9fb 0%,#f5f5f7 100%);
+}
+
+.hero-title{
+  font-size:26px;font-weight:600;
+  color:#1a1a1a;
+  margin-bottom:24px;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  flex-wrap:wrap;
+}
+.hero-title .agent{
+  color:#0bbcd4;font-weight:700;
+}
+.hero-title .arrow{
+  font-size:14px;color:#0bbcd4;
+  background:rgba(11,188,212,0.1);
+  border:1px solid rgba(11,188,212,0.3);
+  border-radius:12px;
+  padding:2px 8px;
+  cursor:pointer;
+}
+
+/* ── SEARCH BOX ── */
+.search-container{
+  max-width:900px;
+  margin:0 auto;
+  background:#fff;
+  border-radius:16px;
+  border:1px solid #e0e0e0;
+  box-shadow:0 2px 12px rgba(0,0,0,0.06);
+  overflow:hidden;
+}
+
+.search-top{
+  display:flex;align-items:flex-start;
+  padding:16px 18px;
+  gap:14px;
+  min-height:80px;
+}
+
+.search-add-btn{
+  width:36px;height:36px;border-radius:8px;
+  border:1.5px dashed #ccc;
+  background:transparent;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;color:#aaa;font-size:18px;
+  flex-shrink:0;
+  transition:border-color 0.2s;
+}
+.search-add-btn:hover{border-color:#0bbcd4;color:#0bbcd4;}
+
+.search-input{
+  flex:1;
+  border:none;outline:none;
+  font-size:14px;font-family:inherit;
+  color:#333;
+  background:transparent;
+  resize:none;
+  min-height:36px;
+  line-height:1.6;
+  padding-top:6px;
+}
+.search-input::placeholder{color:#bbb;}
+
+.search-submit{
+  width:36px;height:36px;border-radius:50%;
+  background:#d0d0d0;
+  border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:16px;
+  flex-shrink:0;
+  transition:background 0.2s;
+  align-self:flex-end;
+}
+.search-submit:hover{background:#0bbcd4;}
+
+.search-bottom{
+  display:flex;align-items:center;
+  padding:10px 18px 14px;
+  gap:6px;
+  border-top:1px solid #f0f0f0;
+}
+
+.mode-chip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:5px 12px;
+  border:1px solid #e0e0e0;
+  border-radius:20px;
+  font-size:12px;color:#555;
+  cursor:pointer;
+  transition:all 0.2s;
+  background:#fff;
+  white-space:nowrap;
+}
+.mode-chip:hover{border-color:#0bbcd4;color:#0bbcd4;}
+.mode-chip.active{
+  border-color:#0bbcd4;
+  color:#0bbcd4;
+  background:rgba(11,188,212,0.06);
+}
+.mode-chip .chip-icon{font-size:13px;}
+
+/* ── TOOLS ROW ── */
+.tools-row{
+  max-width:900px;
+  margin:20px auto;
+  padding:0 0;
+  display:grid;
+  grid-template-columns:2fr 1fr 1fr 1fr 1fr;
+  gap:12px;
+  width:100%;
+  padding:0 60px;
+  box-sizing:border-box;
+}
+
+.tool-card{
+  background:#fff;
+  border:1px solid #e8e8e8;
+  border-radius:14px;
+  padding:14px 16px;
+  cursor:pointer;
+  display:flex;align-items:center;gap:12px;
+  transition:box-shadow 0.2s,border-color 0.2s;
+  text-decoration:none;color:inherit;
+}
+.tool-card:hover{box-shadow:0 4px 16px rgba(0,0,0,0.08);border-color:#d0d0d0;}
+
+.tool-card.wide{
+  flex-direction:row;
+  align-items:center;
+}
+
+.tool-thumb{
+  width:40px;height:40px;border-radius:10px;
+  object-fit:cover;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;
+}
+
+/* Octo dark */
+.octo-thumb{background:#1a1a2e;color:#fff;font-size:16px;font-weight:700;border-radius:10px;}
+
+.tool-info{flex:1;min-width:0;}
+.tool-name{
+  font-size:13px;font-weight:600;color:#1a1a1a;
+  display:flex;align-items:center;gap:5px;
+  margin-bottom:2px;
+}
+.tool-badge{
+  font-size:10px;padding:1px 6px;border-radius:4px;
+  background:#e8f4ff;color:#0099cc;font-weight:400;
+}
+.tool-desc{font-size:11px;color:#999;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* small tool card */
+.tool-card.small{
+  flex-direction:column;
+  align-items:flex-start;
+  gap:6px;
+  padding:12px 14px;
+}
+.tool-card.small .tool-thumb{width:36px;height:36px;}
+.tool-card.small .tool-name{font-size:12px;}
+.tool-card.small .tool-desc{font-size:11px;white-space:normal;}
+
+/* ── DISCOVER SECTION ── */
+.discover{
+  padding:0 60px 40px;
+}
+
+.discover-tabs{
+  display:flex;align-items:center;gap:0;
+  margin-bottom:16px;
+  border-bottom:1px solid #e8e8e8;
+}
+
+.disc-tab{
+  padding:10px 18px;
+  font-size:14px;color:#666;
+  cursor:pointer;border-bottom:2px solid transparent;
+  margin-bottom:-1px;
+  transition:all 0.2s;
+  white-space:nowrap;
+}
+.disc-tab:hover{color:#0bbcd4;}
+.disc-tab.active{color:#0bbcd4;border-bottom-color:#0bbcd4;font-weight:500;}
+
+.disc-search{
+  margin-left:auto;
+  display:flex;align-items:center;gap:6px;
+  padding:6px 14px;
+  background:#f5f5f5;
+  border:1px solid #e0e0e0;
+  border-radius:20px;
+  font-size:13px;color:#999;
+  cursor:pointer;
+}
+
+/* ── GALLERY ── */
+.gallery{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+}
+
+.gallery-item{
+  border-radius:10px;overflow:hidden;
+  cursor:pointer;position:relative;
+  aspect-ratio:4/3;
+  background:#e0e0e0;
+}
+
+.gallery-item img{width:100%;height:100%;object-fit:cover;display:block;}
+
+/* placeholder colorful cards */
+.g1{background:linear-gradient(135deg,#7c3aed 0%,#2563eb 50%,#0ea5e9 100%);}
+.g2{background:linear-gradient(135deg,#374151 0%,#6b7280 100%);}
+.g3{background:linear-gradient(135deg,#0d9488 0%,#06b6d4 50%,#3b82f6 100%);}
+.g4{background:linear-gradient(135deg,#fde68a 0%,#f59e0b 50%,#ec4899 100%);}
+
+.gallery-label{
+  position:absolute;bottom:10px;left:10px;
+  background:rgba(0,0,0,0.55);
+  color:#fff;font-size:11px;
+  padding:3px 8px;border-radius:6px;
+  backdrop-filter:blur(4px);
+}
+
+.gallery-count{
+  font-size:11px;color:#999;
+  margin-top:4px;
+}
+
+/* img placeholder with emoji */
+.placeholder{
+  width:100%;height:100%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:48px;
+}
+
+/* ── RIGHT SIDE PANEL ── */
+.right-panel{
+  width:40px;
+  background:#fff;
+  border-left:1px solid #e8e8e8;
+  display:flex;flex-direction:column;
+  align-items:center;
+  padding:12px 0;
+  gap:8px;
+  flex-shrink:0;
+}
+
+.rp-btn{
+  width:28px;height:28px;
+  border-radius:6px;
+  background:#f0f0f0;
+  border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;color:#888;
+  transition:all 0.2s;
+}
+.rp-btn:hover{background:#e0e0e0;color:#333;}
+
+/* ── SCROLLBAR ── */
+.main::-webkit-scrollbar{width:6px;}
+.main::-webkit-scrollbar-track{background:transparent;}
+.main::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.15);border-radius:3px;}
+
+/* ── TOOL ICON COLORS ── */
+.icon-canvas{background:linear-gradient(135deg,#6366f1,#a78bfa);}
+.icon-agent{background:linear-gradient(135deg,#0bbcd4,#06b6d4);}
+.icon-img{background:linear-gradient(135deg,#3b82f6,#60a5fa);}
+.icon-vid{background:linear-gradient(135deg,#3b82f6,#818cf8);}
+</style>
+</head>
+<body>
+
+<!-- TOP BANNER -->
+<div class="top-banner" id="topBanner">
+  <span>仅需一行指令，可在任意 Agent 使用即梦创作</span>
+  <button class="banner-btn">一键配置</button>
+  <button class="banner-close" onclick="document.getElementById('topBanner').style.display='none'">×</button>
+</div>
+
+<div class="layout">
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar">
+    <!-- Logo star -->
+    <div class="sidebar-logo">
+      <svg viewBox="0 0 32 32" fill="none">
+        <defs>
+          <linearGradient id="sg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#0bbcd4"/>
+            <stop offset="100%" stop-color="#7c3aed"/>
+          </linearGradient>
+        </defs>
+        <path d="M16 3 L18.5 12 L28 12 L20.5 17.5 L23 27 L16 21.5 L9 27 L11.5 17.5 L4 12 L13.5 12 Z" fill="url(#sg)"/>
+      </svg>
+    </div>
+
+    <a class="nav-item active" href="#">
+      <span class="nav-icon">⌂</span>
+      <span>灵感</span>
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">◇</span>
+      <span>生成</span>
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">▣</span>
+      <span>资产</span>
+    </a>
+    <a class="nav-item" href="#">
+      <span class="nav-icon">⊞</span>
+      <span>画布</span>
+    </a>
+
+    <div class="sidebar-bottom">
+      <!-- Octo -->
+      <div class="octo-item">
+        <div class="octo-icon">Oc</div>
+        <span style="font-size:11px;color:#888;">Octo</span>
+        <div class="octo-beta">Beta</div>
+      </div>
+
+      <a class="nav-item" href="#">
+        <span class="nav-icon" style="font-size:14px;">登录</span>
+      </a>
+      <a class="nav-item" href="#">
+        <span class="nav-icon">□</span>
+      </a>
+      <a class="nav-item" href="#">
+        <span style="font-size:11px;color:#aaa;">API</span>
+      </a>
+      <a class="nav-item" href="#">
+        <span class="nav-icon">≡</span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- HERO -->
+    <div class="hero">
+      <div class="hero-title">
+        开启你的 <span class="agent">Agent 模式</span>
+        <span class="arrow">∨</span>
+        即刻造梦！
+      </div>
+
+      <!-- SEARCH BOX -->
+      <div style="padding:0 60px;">
+        <div class="search-container">
+          <div class="search-top">
+            <button class="search-add-btn">+</button>
+            <textarea class="search-input" rows="2" placeholder="Seedance 2.0全能参考，上传参考、输入文字，创意无限可能"></textarea>
+            <button class="search-submit">↑</button>
+          </div>
+          <div class="search-bottom">
+            <div class="mode-chip active">
+              <span class="chip-icon">≋</span> Agent 模式 <span>∨</span>
+            </div>
+            <div class="mode-chip">
+              <span class="chip-icon">≡</span> 自动
+            </div>
+            <div class="mode-chip">
+              <span class="chip-icon">⊙</span> 灵感搜索
+            </div>
+            <div class="mode-chip">
+              <span class="chip-icon">✦</span> 创意设计
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOOLS ROW -->
+    <div class="tools-row">
+      <!-- Octo wide -->
+      <div class="tool-card wide">
+        <div class="tool-thumb octo-thumb">Oc</div>
+        <div class="tool-info">
+          <div class="tool-name">Octo <span class="tool-badge">Beta</span></div>
+          <div class="tool-desc">Vibe create，创作自然流动</div>
+        </div>
+      </div>
+
+      <!-- 无限画布 -->
+      <div class="tool-card small">
+        <div class="tool-thumb icon-canvas" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">🖼</div>
+        <div class="tool-info">
+          <div class="tool-name">无限画布</div>
+          <div class="tool-desc">自由创作</div>
+        </div>
+      </div>
+
+      <!-- Agent模式 -->
+      <div class="tool-card small">
+        <div class="tool-thumb icon-agent">✦</div>
+        <div class="tool-info">
+          <div class="tool-name">Agent 模式</div>
+          <div class="tool-desc">S2.0视频创作</div>
+        </div>
+      </div>
+
+      <!-- 图片生成 -->
+      <div class="tool-card small">
+        <div class="tool-thumb icon-img" style="font-size:18px;color:#fff;background:linear-gradient(135deg,#3b82f6,#06b6d4);">4.1</div>
+        <div class="tool-info">
+          <div class="tool-name">图片生成</div>
+          <div class="tool-desc">智能美学提升</div>
+        </div>
+      </div>
+
+      <!-- 视频生成 -->
+      <div class="tool-card small">
+        <div class="tool-thumb" style="background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;border-radius:10px;">2.0</div>
+        <div class="tool-info">
+          <div class="tool-name">视频生成</div>
+          <div class="tool-desc">Seedance 2.0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DISCOVER SECTION -->
+    <div class="discover">
+      <div class="discover-tabs">
+        <div class="disc-tab active">发现</div>
+        <div class="disc-tab">短片</div>
+        <div class="disc-tab">活动</div>
+        <div class="disc-search">
+          <span>🔍</span>
+          <span>印章制作</span>
+        </div>
+      </div>
+
+      <!-- GALLERY -->
+      <div class="gallery">
+        <!-- Card 1: Competition banner -->
+        <div class="gallery-item g1">
+          <div class="placeholder" style="flex-direction:column;gap:8px;">
+            <span style="font-size:24px;font-weight:700;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.4);">安慕希</span>
+            <span style="font-size:13px;color:rgba(255,255,255,0.9);">整颗蓝莓AI创作大赛</span>
+            <span style="font-size:11px;color:rgba(255,255,255,0.7);">4月7日重磅上线</span>
+          </div>
+          <div class="gallery-label">安慕希整颗蓝莓AI创作大赛</div>
+          <div style="position:absolute;bottom:28px;left:10px;font-size:10px;color:rgba(255,255,255,0.65);">已有768人参与</div>
+        </div>
+
+        <!-- Card 2: Person at desk -->
+        <div class="gallery-item g2">
+          <div class="placeholder">💻</div>
+        </div>
+
+        <!-- Card 3: Colorful illustration -->
+        <div class="gallery-item g3">
+          <div class="placeholder">🎨</div>
+        </div>
+
+        <!-- Card 4: Nature stream -->
+        <div class="gallery-item g4">
+          <div class="placeholder">🌊</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <button class="rp-btn">⊞</button>
+    <button class="rp-btn">◎</button>
+  </div>
+
+</div>
+
+<script>
+// Tab switching
+document.querySelectorAll('.disc-tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.disc-tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+  });
+});
+
+document.querySelectorAll('.mode-chip').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.mode-chip').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+  });
+});
+
+document.querySelectorAll('.nav-item').forEach(t=>{
+  t.addEventListener('click',e=>{
+    e.preventDefault();
+    document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+  });
+});
+
+// auto-resize textarea
+const ta = document.querySelector('.search-input');
+ta.addEventListener('input',()=>{
+  ta.style.height='auto';
+  ta.style.height=ta.scrollHeight+'px';
+});
+</script>
+</body>
+</html>

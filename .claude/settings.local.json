@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/generator.py'\\).read\\(\\)\\); print\\('generator.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('routers/generations.py'\\).read\\(\\)\\); print\\('generations.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/knowledge.py'\\).read\\(\\)\\); print\\('knowledge.py OK'\\)\")",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git config *)"
+    ]
+  }
+}
