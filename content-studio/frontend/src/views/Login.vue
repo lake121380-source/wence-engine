@@ -43,6 +43,10 @@
           </div>
           <h2 class="login-title">{{ isRegister ? '创建账号' : '欢迎回来' }}</h2>
           <p class="login-sub">{{ isRegister ? '注册即可开始免费体验' : '登录你的账号继续创作' }}</p>
+          <div v-if="authStore.isAuthenticated && !isRegister" class="switch-account-banner">
+            当前已登录为 <strong>{{ authStore.user?.nickname || authStore.user?.email }}</strong>，
+            <a href="#" @click.prevent="handleLogoutAndSwitch">切换账号</a>
+          </div>
         </div>
 
         <!-- 登录方式 Tab -->
@@ -242,7 +246,8 @@ function _handleLoginSuccess(data) {
   authStore.setToken(data.token)
   authStore.setUser(data.user)
   authStore.setTenant(data.tenant || null)
-  router.replace('/app')
+  // 全页刷新以销毁 keep-alive 缓存的旧账号数据，防止数据泄露
+  window.location.href = '/app'
 }
 
 function switchToRegister() {
@@ -256,9 +261,14 @@ function switchToLogin() {
   if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null }
 }
 
+function handleLogoutAndSwitch() {
+  authStore.logout()
+  window.location.reload()
+}
+
 onMounted(async () => {
   if (authStore.isAuthenticated) {
-    router.replace('/app')
+    // 已登录用户访问登录页：显示切换账号提示，不自动跳转
     return
   }
   await handleWechatOAuthCallback()
@@ -320,6 +330,26 @@ onBeforeUnmount(() => { if (countdownTimer) clearInterval(countdownTimer) })
 .toggle-row { text-align: center; margin-top: 18px; font-size: 13px; color: #64748b; }
 .toggle-row a { color: #0891b2; font-weight: 600; text-decoration: none; margin-left: 4px; }
 .toggle-row a:hover { text-decoration: underline; }
+
+.switch-account-banner {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #92400e;
+  text-align: center;
+  line-height: 1.6;
+}
+.switch-account-banner a {
+  color: #0891b2;
+  font-weight: 600;
+  text-decoration: none;
+}
+.switch-account-banner a:hover {
+  text-decoration: underline;
+}
 
 /* 微信二维码 */
 .wechat-body { display: flex; flex-direction: column; align-items: center; padding: 8px 0; min-height: 280px; justify-content: center; gap: 12px; }

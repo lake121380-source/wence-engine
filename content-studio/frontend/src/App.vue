@@ -142,7 +142,8 @@ onMounted(async () => {
 
 function handleLogout() {
   authStore.logout()
-  router.push('/login')
+  // 全页刷新以销毁 keep-alive 缓存的所有组件状态
+  window.location.href = '/login'
 }
 
 function goToPricing() {
