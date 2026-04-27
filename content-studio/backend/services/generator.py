@@ -57,7 +57,7 @@ class GeneratorService:
             viewpoint_ids, viral_analysis_ids, tenant_id, history,
         )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         message = await loop.run_in_executor(
             None,
             lambda: self.client.messages.create(
@@ -68,7 +68,7 @@ class GeneratorService:
                 messages=rag["ai_messages"],
             )
         )
-        raw_output = message.content[0].text.strip()
+        raw_output = self._extract_text_content(message)
         output = self._parse_output(raw_output)
 
         gen = self._save_generation(
@@ -178,6 +178,8 @@ class GeneratorService:
             "prompt_pack": prompt_pack,
             "prompt": prompt,
             "ai_messages": ai_messages,
+            "user_prompt": user_prompt,
+            "topic": topic,
         }
 
     def _save_generation(self, db, rag, output, raw_output,
@@ -189,7 +191,7 @@ class GeneratorService:
         prompt_pack = rag["prompt_pack"]
         gen = Generation(
             tenant_id=tenant_id, user_id=user_id,
-            topic=rag.get("user_prompt", "")[:100],
+            topic=(rag.get("topic") or rag.get("user_prompt", ""))[:100],
             platform=rag.get("platform", "douyin"),
             style_template_id=style_template_id,
             product_doc_ids=product_doc_ids or [],
@@ -289,7 +291,7 @@ class GeneratorService:
         ai_messages = rag["ai_messages"]
 
         # ── 流式调用 LLM（使用 asyncio.Queue 消除忙等） ──
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         import threading
         q = asyncio.Queue()
 
@@ -347,6 +349,18 @@ class GeneratorService:
             "topic": topic,
         }
         yield f"event: done\ndata: {json.dumps(result, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def _extract_text_content(message) -> str:
+        """安全地从 Anthropic API 响应中提取文本内容，防止 tool_use 或空响应崩溃。"""
+        if not message or not message.content:
+            return ""
+        for block in message.content:
+            if hasattr(block, "type") and block.type == "text" and hasattr(block, "text"):
+                return block.text.strip()
+            if hasattr(block, "text"):
+                return block.text.strip()
+        return ""
 
     async def analyze_style(self, db: Session, creator_id: int, tenant_id: int = None) -> dict:
         """
@@ -409,8 +423,7 @@ class GeneratorService:
   "example_scripts": ["从样本中提炼的最佳文案模板1（200字以内，保留原始风格）", "模板2"]
 }}"""
 
-        import json, asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         message = await loop.run_in_executor(
             None,
             lambda: self.client.messages.create(
@@ -419,7 +432,7 @@ class GeneratorService:
                 messages=[{"role": "user", "content": analysis_prompt}]
             )
         )
-        raw = message.content[0].text.strip().replace("```json", "").replace("```", "").strip()
+        raw = self._extract_text_content(message).replace("```json", "").replace("```", "").strip()
 
         try:
             style_data = json.loads(raw)
@@ -645,9 +658,7 @@ class GeneratorService:
   "example_scripts": ["融合风格示例文案1"]
 }}"""
 
-        import json, asyncio
-
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         message = await loop.run_in_executor(
             None,
             lambda: self.client.messages.create(
@@ -656,7 +667,7 @@ class GeneratorService:
                 messages=[{"role": "user", "content": analysis_prompt}]
             )
         )
-        raw = message.content[0].text.strip().replace("```json", "").replace("```", "").strip()
+        raw = self._extract_text_content(message).replace("```json", "").replace("```", "").strip()
 
         try:
             style_data = json.loads(raw)

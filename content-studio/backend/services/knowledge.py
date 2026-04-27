@@ -414,10 +414,12 @@ class KnowledgeService:
 
     def _format_results(self, results: dict) -> list[dict]:
         out = []
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
-        for doc, meta, dist in zip(docs, metas, distances):
+        docs = results.get("documents", [])
+        metas = results.get("metadatas", [])
+        distances = results.get("distances", [])
+        if not docs or not metas or not distances:
+            return []
+        for doc, meta, dist in zip(docs[0], metas[0], distances[0]):
             out.append({"text": doc, "metadata": meta, "score": round(1 - dist, 4)})
         return out
 

@@ -1,12 +1,9 @@
-import asyncio
-import uuid
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database import SessionLocal, get_db
+from database import get_db
 from models import Creator, CreatorVideo, Document, TenantCreator, User, VideoAnalysis
 from routers.deps import require_active_subscription
 from services.analyzer import analyzer_service
@@ -22,7 +19,6 @@ from services.topic_hunter import topic_hunter
 
 router = APIRouter()
 
-_discover_tasks: dict[str, dict] = {}
 STYLE_ANALYSIS_MIN_VIDEOS = 30
 
 
@@ -471,48 +467,6 @@ async def auto_discover_and_crawl(
         platforms=req.platforms,
     )
     return {"task_id": task["task_id"], "message": "任务已启动"}
-
-    current_tenant_id = current_user.tenant_id
-    task_id = str(uuid.uuid4())
-    _discover_tasks[task_id] = {
-        "status": "pending",
-        "progress": 0,
-        "total": 0,
-        "log": [],
-        "result": None,
-    }
-
-    async def run_task():
-        db = SessionLocal()
-        task = _discover_tasks[task_id]
-        task["status"] = "running"
-        try:
-            async def on_progress(step, total, msg, state="processing"):
-                task["progress"] = step
-                task["total"] = total
-                task["log"].append(msg)
-                if len(task["log"]) > 100:
-                    task["log"] = task["log"][-100:]
-
-            result = await crawler_service.auto_discover_and_crawl(
-                db=db,
-                keyword=req.keyword,
-                limit=req.limit,
-                platforms=req.platforms,
-                progress_callback=on_progress,
-                tenant_id=current_tenant_id,
-            )
-            task["status"] = "done"
-            task["result"] = result
-            task["progress"] = task["total"]
-        except Exception as exc:
-            task["status"] = "error"
-            task["log"].append(f"错误: {str(exc)}")
-        finally:
-            db.close()
-
-    background_tasks.add_task(run_task)
-    return {"task_id": task_id, "message": "任务已启动"}
 
 
 @router.get("/creators/discover-task/{task_id}")
