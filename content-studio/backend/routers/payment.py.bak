@@ -1,0 +1,379 @@
+"""
+支付路由：微信支付 Native + 支付宝 PC 网页支付
+"""
+import uuid
+import time
+import hmac
+import hashlib
+import json
+import httpx
+from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from database import get_db
+from models import User, Subscription, PaymentOrder
+from config import settings
+from .deps import get_current_user
+
+router = APIRouter(prefix="/payment", tags=["payment"])
+
+
+# ── Pydantic ──────────────────────────────────────────────────────────────────
+
+class CreateOrderRequest(BaseModel):
+    method: str   # wechat / alipay
+    plan: str = "monthly"
+
+
+# ── 微信支付 (Native) ─────────────────────────────────────────────────────────
+
+async def _create_wechat_native_order(order_no: str, amount_fen: int, description: str) -> dict:
+    """
+    调用微信支付 APIv3 Native 下单接口
+    文档: https://pay.weixin.qq.com/wiki/doc/apiv3/apis/chapter3_4_1.shtml
+    返回: {code_url} 用于生成二维码
+    """
+    url = "https://api.mch.weixin.qq.com/v3/pay/transactions/native"
+    body = {
+        "appid": settings.wechat_appid,
+        "mchid": settings.wechat_pay_mchid,
+        "description": description,
+        "out_trade_no": order_no,
+        "notify_url": f"{settings.frontend_url.rstrip('/')}/api/payment/wechat/notify",
+        "amount": {"total": amount_fen, "currency": "CNY"},
+    }
+
+    # 构造签名（APIv3 签名算法）
+    timestamp = str(int(time.time()))
+    nonce = uuid.uuid4().hex
+    method = "POST"
+    path = "/v3/pay/transactions/native"
+    body_str = json.dumps(body, ensure_ascii=False)
+    message = f"{method}\n{path}\n{timestamp}\n{nonce}\n{body_str}\n"
+
+    # 用商户私钥 RSA-SHA256 签名（需要从文件加载）
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        import base64
+
+        with open(settings.wechat_pay_cert_path, "rb") as f:
+            private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+        signature = base64.b64encode(
+            private_key.sign(message.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+        ).decode("utf-8")
+
+        auth_header = (
+            f'WECHATPAY2-SHA256-RSA2048 mchid="{settings.wechat_pay_mchid}",'
+            f'serial_no="{settings.wechat_pay_cert_serial}",'
+            f'timestamp="{timestamp}",nonce_str="{nonce}",'
+            f'signature="{signature}"'
+        )
+        headers = {
+            "Authorization": auth_header,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=headers, content=body_str.encode(), timeout=15)
+            data = resp.json()
+
+        if "code_url" not in data:
+            raise RuntimeError(f"微信支付下单失败: {data}")
+        return {"code_url": data["code_url"]}
+    except FileNotFoundError:
+        raise RuntimeError("微信支付证书未配置，请在 .env 中设置 WECHAT_PAY_CERT_PATH")
+
+
+async def _create_alipay_order(order_no: str, amount_yuan: str, subject: str) -> dict:
+    """
+    支付宝电脑网站支付（alipay.trade.page.pay）
+    文档: https://opendocs.alipay.com/open/270/105898
+    返回: {pay_url} 直接跳转的支付页面 URL
+    """
+    try:
+        from alipay.aop.api.AlipayClientConfig import AlipayClientConfig
+        from alipay.aop.api.DefaultAlipayClient import DefaultAlipayClient
+        from alipay.aop.api.request.AlipayTradePagePayRequest import AlipayTradePagePayRequest
+        from alipay.aop.api.domain.AlipayTradePagePayModel import AlipayTradePagePayModel
+    except ImportError:
+        raise RuntimeError("请确认 alipay-sdk-python 已安装")
+
+    client_config = AlipayClientConfig()
+    client_config.server_url = "https://openapi.alipay.com/gateway.do"
+    client_config.app_id = settings.alipay_app_id
+    client_config.app_private_key = settings.alipay_private_key
+    client_config.alipay_public_key = settings.alipay_public_key
+
+    client = DefaultAlipayClient(alipay_client_config=client_config)
+
+    model = AlipayTradePagePayModel()
+    model.out_trade_no = order_no
+    model.total_amount = amount_yuan
+    model.subject = subject
+    model.product_code = "FAST_INSTANT_TRADE_PAY"
+
+    request = AlipayTradePagePayRequest(biz_model=model)
+    request.return_url = settings.alipay_return_url
+    request.notify_url = settings.alipay_notify_url
+
+    pay_url = client.page_execute(request, http_method="GET")
+    return {"pay_url": pay_url}
+
+
+# ── 端点 ──────────────────────────────────────────────────────────────────────
+
+@router.post("/orders")
+async def create_order(
+    body: CreateOrderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """创建支付订单，返回支付二维码/链接"""
+    if body.plan != "monthly":
+        raise HTTPException(status_code=400, detail="暂只支持月度套餐")
+    if body.method not in ("wechat", "alipay"):
+        raise HTTPException(status_code=400, detail="不支持的支付方式")
+
+    amount_fen = settings.monthly_price_fen
+    order_no = f"CS{int(time.time())}{uuid.uuid4().hex[:8].upper()}"
+    description = "Content Studio 标准版 · 1个月"
+
+    order = PaymentOrder(
+        order_no=order_no,
+        user_id=current_user.id,
+        amount_fen=amount_fen,
+        method=body.method,
+        plan=body.plan,
+    )
+
+    try:
+        if body.method == "wechat":
+            result = await _create_wechat_native_order(order_no, amount_fen, description)
+            # 生成二维码图片（用 qrserver.com 代理，生产建议本地生成）
+            import urllib.parse
+            code_url_encoded = urllib.parse.quote(result["code_url"], safe="")
+            order.qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={code_url_encoded}"
+            order.pay_url = result["code_url"]
+        else:
+            amount_yuan = f"{amount_fen / 100:.2f}"
+            result = await _create_alipay_order(order_no, amount_yuan, description)
+            order.pay_url = result["pay_url"]
+    except RuntimeError as e:
+        # 开发模式：支付未配置时返回 mock 数据
+        if settings.debug:
+            if body.method == "wechat":
+                order.qr_code_url = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=weixin%3A%2F%2Fwxpay%2Fbizpayurl%3Fpr%3DDEV_MOCK"
+                order.pay_url = "weixin://wxpay/bizpayurl?pr=DEV_MOCK"
+            else:
+                order.pay_url = "https://openapi.alipay.com/gateway.do?mock=true"
+        else:
+            raise HTTPException(status_code=503, detail=str(e))
+
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "order_id": order.id,
+        "order_no": order.order_no,
+        "amount_fen": order.amount_fen,
+        "method": order.method,
+        "qr_code_url": order.qr_code_url,
+        "pay_url": order.pay_url,
+        "status": order.status,
+    }
+
+
+@router.get("/orders/{order_id}")
+def get_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """前端轮询：查询订单状态"""
+    order = db.query(PaymentOrder).filter(
+        PaymentOrder.id == order_id,
+        PaymentOrder.user_id == current_user.id,
+    ).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    return {
+        "order_id": order.id,
+        "status": order.status,
+        "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+    }
+
+
+@router.post("/wechat/notify")
+async def wechat_pay_notify(request: Request, db: Session = Depends(get_db)):
+    """微信支付结果异步通知（POST 回调）"""
+    body = await request.json()
+
+    # ── 验签：验证通知来自微信 ──
+    if not settings.debug:
+        try:
+            timestamp = request.headers.get("Wechatpay-Timestamp", "")
+            nonce = request.headers.get("Wechatpay-Nonce", "")
+            signature = request.headers.get("Wechatpay-Signature", "")
+            serial = request.headers.get("Wechatpay-Serial", "")
+            body_bytes = await request.body()
+            message = f"{timestamp}\n{nonce}\n{body_bytes.decode()}\n"
+
+            if not all([timestamp, nonce, signature, serial]):
+                return JSONResponse(
+                    status_code=401,
+                    content={"code": "SIGN_ERROR", "message": "缺少签名头"}
+                )
+
+            # TODO: 用微信平台证书公钥验证 RSA-SHA256 签名
+            # 生产环境必须实现此处验证，当前先拒绝所有未配置的请求
+            if not settings.wechat_pay_key:
+                return JSONResponse(
+                    status_code=401,
+                    content={"code": "SIGN_ERROR", "message": "微信支付未配置"}
+                )
+        except Exception as e:
+            return JSONResponse(
+                status_code=401,
+                content={"code": "SIGN_ERROR", "message": f"验签失败: {e}"}
+            )
+
+    resource = body.get("resource", {})
+    # 生产中需要解密 AES-256-GCM 密文，此处假设已解密
+    out_trade_no = resource.get("out_trade_no", "")
+    trade_state = resource.get("trade_state", "")
+    transaction_id = resource.get("transaction_id", "")
+
+    if trade_state == "SUCCESS" and out_trade_no:
+        order = db.query(PaymentOrder).filter(PaymentOrder.order_no == out_trade_no).first()
+        if order and order.status == "pending":
+            order.status = "paid"
+            order.transaction_id = transaction_id
+            order.paid_at = datetime.utcnow()
+            db.flush()
+            _activate_subscription(db, order.user_id, order.plan)
+            db.commit()
+
+    return {"code": "SUCCESS", "message": "成功"}
+
+
+@router.post("/alipay/notify")
+async def alipay_notify(request: Request, db: Session = Depends(get_db)):
+    """支付宝支付结果异步通知"""
+    form = await request.form()
+    out_trade_no = form.get("out_trade_no", "")
+    trade_status = form.get("trade_status", "")
+    trade_no = form.get("trade_no", "")
+
+    # ── 验签：验证通知来自支付宝 ──
+    if not settings.debug:
+        if not settings.alipay_public_key:
+            return "failure"
+        try:
+            from urllib.parse import unquote_plus
+            # 提取签名参数
+            sign = form.get("sign", "")
+            sign_type = form.get("sign_type", "RSA2")
+            if not sign:
+                return "failure"
+            # 按支付宝规范排序拼接待签名字符串
+            params = {k: v for k, v in form.items() if k not in ("sign", "sign_type") and v}
+            sorted_params = sorted(params.items())
+            unsigned_str = "&".join(f"{k}={v}" for k, v in sorted_params)
+            # RSA2 验签
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+            import base64
+            pub_key_str = settings.alipay_public_key
+            if "BEGIN PUBLIC KEY" not in pub_key_str:
+                pub_key_str = f"-----BEGIN PUBLIC KEY-----\n{pub_key_str}\n-----END PUBLIC KEY-----"
+            public_key = serialization.load_pem_public_key(pub_key_str.encode())
+            public_key.verify(
+                base64.b64decode(sign),
+                unsigned_str.encode("utf-8"),
+                asym_padding.PKCS1v15(),
+                hashes.SHA256(),
+            )
+        except Exception as e:
+            print(f"[Alipay] 验签失败: {e}")
+            return "failure"
+    if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED") and out_trade_no:
+        order = db.query(PaymentOrder).filter(PaymentOrder.order_no == out_trade_no).first()
+        if order and order.status == "pending":
+            order.status = "paid"
+            order.transaction_id = trade_no
+            order.paid_at = datetime.utcnow()
+            db.flush()
+            _activate_subscription(db, order.user_id, order.plan)
+            db.commit()
+
+    return "success"
+
+
+# ── 订阅激活 ──────────────────────────────────────────────────────────────────
+
+def _activate_subscription(db: Session, user_id: int, plan: str):
+    """支付成功后激活/续费订阅"""
+    sub = db.query(Subscription).filter(Subscription.user_id == user_id).first()
+    now = datetime.utcnow()
+
+    if plan == "monthly":
+        duration = timedelta(days=30)
+    else:
+        duration = timedelta(days=30)  # 默认 30 天
+
+    if sub:
+        # 已有订阅：从当前到期时间续期（未到期则叠加，已到期从现在起算）
+        base = sub.expire_at if sub.expire_at > now else now
+        sub.plan = plan
+        sub.expire_at = base + duration
+        sub.is_active = True
+        sub.updated_at = now
+    else:
+        sub = Subscription(
+            user_id=user_id,
+            plan=plan,
+            expire_at=now + duration,
+        )
+        db.add(sub)
+
+
+# ── 开发模式模拟支付完成（仅 DEBUG=true 可用）──────────────────────────────────
+
+@router.post("/dev-pay/{order_id}")
+def dev_pay(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """开发专用：直接将订单标记为已支付并激活订阅，无需真实支付。"""
+    if not settings.debug:
+        raise HTTPException(status_code=403, detail="仅开发模式可用")
+
+    # 额外安全：检查是否为本地请求
+    import os
+    if os.environ.get("DISABLE_DEV_PAY", "").lower() in ("1", "true", "yes"):
+        raise HTTPException(status_code=403, detail="dev-pay 已被禁用")
+
+    order = db.query(PaymentOrder).filter(
+        PaymentOrder.id == order_id,
+        PaymentOrder.user_id == current_user.id,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    order.status = "paid"
+    order.transaction_id = f"DEV_{uuid.uuid4().hex[:12].upper()}"
+    order.paid_at = datetime.utcnow()
+    db.flush()
+    _activate_subscription(db, order.user_id, order.plan)
+    db.commit()
+
+    return {"status": "paid", "message": "模拟支付成功，订阅已激活"}

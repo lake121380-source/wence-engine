@@ -1,0 +1,48 @@
+# ---- Secrets / environment (NEVER commit real keys) ----
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv_*/
+venv/
+env/
+
+# ---- Node / Vue ----
+node_modules/
+dist/
+.vite/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ---- Databases / vector store ----
+*.db
+*.sqlite
+*.sqlite3
+chroma_db/
+
+# ---- Uploads / generated ----
+uploads/
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# ---- Test / tooling artifacts ----
+playwright-report/
+test-results/
+.coverage
+htmlcov/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
