@@ -17,12 +17,16 @@
         <n-data-table :columns="topicCols" :data="topics" :loading="topicsLoading" :pagination="topicsPag" :row-key="r => r.id" @update:page="p => { topicsPag.page = p; fetchTopics() }" />
       </n-tab-pane>
 
-      <n-tab-pane name="generations" tab="生成内容">
+      <n-tab-pane name="generations" tab="生成内容明细">
         <n-space align="center" style="margin-bottom: 12px">
           <n-input v-model:value="gensKeyword" placeholder="搜索标题/内容" clearable style="width: 200px" @keyup.enter="fetchGenerations" />
           <n-button type="primary" size="small" @click="fetchGenerations">搜索</n-button>
         </n-space>
         <n-data-table :columns="genCols" :data="generations" :loading="gensLoading" :pagination="gensPag" :row-key="r => r.id" @update:page="p => { gensPag.page = p; fetchGenerations() }" />
+      </n-tab-pane>
+
+      <n-tab-pane name="analytics" tab="生成分析与引擎指标">
+        <GenerationAnalytics />
       </n-tab-pane>
     </n-tabs>
 
@@ -43,6 +47,7 @@
 import { ref, h, onMounted, reactive } from 'vue'
 import { NTag, NButton, NDivider } from 'naive-ui'
 import { contentApi } from '../api'
+import GenerationAnalytics from './GenerationAnalytics.vue'
 
 const activeTab = ref('creators')
 

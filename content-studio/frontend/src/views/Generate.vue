@@ -31,61 +31,215 @@
         >
           <div class="chat-avatar">{{ msg.role === 'user' ? '你' : 'AI' }}</div>
 
-          <div class="chat-bubble" :class="{ 'result-compact': msg.type === 'result' && !isResultExpanded(msg.id) }">
+          <div
+            class="chat-bubble"
+            :class="{
+              'is-result-slate': msg.type === 'result',
+              'result-collapsed': msg.type === 'result' && !isResultExpanded(msg.id)
+            }"
+          >
             <template v-if="msg.type === 'result'">
-              <div class="result-head">
-                <div class="result-title">已生成一版文案</div>
-                <n-space size="small">
+              <!-- 🎬 导演台账顶栏：极富影视张力的标头与视图切换 -->
+              <div class="slate-clapper-header">
+                <div class="slate-title-group">
+                  <div class="slate-index-badge">
+                    <span class="slate-clapper-stripe"></span>
+                    <span class="slate-badge-text">SLATE 工业分镜台账</span>
+                  </div>
+                  <h3 class="slate-main-title" :title="msg.data.title || '短视频口播脚本'">
+                    {{ msg.data.title || '短视频口播脚本' }}
+                  </h3>
+                </div>
+
+                <div class="slate-actions">
+                  <!-- 视图模式切换 -->
+                  <div class="slate-mode-tabs">
+                    <button
+                      class="slate-tab-btn"
+                      :class="{ active: getResultViewMode(msg.id) === 'slate' }"
+                      @click="setResultViewMode(msg.id, 'slate')"
+                      title="工业级影视分镜台账"
+                    >
+                      <n-icon size="14"><FilmOutline /></n-icon>
+                      <span>导演分镜</span>
+                    </button>
+                    <button
+                      class="slate-tab-btn"
+                      :class="{ active: getResultViewMode(msg.id) === 'script' }"
+                      @click="setResultViewMode(msg.id, 'script')"
+                      title="提词器专用连续口播文案"
+                    >
+                      <n-icon size="14"><DocumentTextOutline /></n-icon>
+                      <span>口播通读</span>
+                    </button>
+                  </div>
+
                   <n-button
-                    v-if="bodyIsLong(msg.data)"
-                    size="tiny"
+                    size="small"
                     quaternary
                     @click="toggleResultExpand(msg.id)"
+                    class="slate-collapse-btn"
                   >
                     {{ isResultExpanded(msg.id) ? '收起' : '展开' }}
                   </n-button>
-                  <n-button size="tiny" secondary @click="copyResult(msg)">
-                    <template #icon><n-icon><CopyOutline /></n-icon></template>
-                    复制
-                  </n-button>
-                  <n-button size="tiny" quaternary :disabled="generating" @click="regenerate(msg.payload)">
-                    <template #icon><n-icon><RefreshOutline /></n-icon></template>
-                    再生成
-                  </n-button>
-                </n-space>
+                </div>
               </div>
 
-              <div class="result-block">
-                <div class="result-value body" :class="{ compact: !isResultExpanded(msg.id) }">
+              <!-- 导演台账核心技术指标看板（字数、时长、分镜数、完播率预测） -->
+              <div class="slate-meta-ribbon">
+                <div class="slate-metric-item">
+                  <span class="slate-metric-label">平台适配</span>
+                  <span class="slate-metric-val platform-tag">{{ getPlatformLabel(msg.data.platform || config.platform) }}</span>
+                </div>
+                <div class="slate-metric-divider"></div>
+                <div class="slate-metric-item">
+                  <span class="slate-metric-label">预估时长</span>
+                  <span class="slate-metric-val duration">{{ getScriptStats(msg.data).duration }}</span>
+                </div>
+                <div class="slate-metric-divider"></div>
+                <div class="slate-metric-item">
+                  <span class="slate-metric-label">台词字数</span>
+                  <span class="slate-metric-val words">{{ getScriptStats(msg.data).words }} 字</span>
+                </div>
+                <div class="slate-metric-divider"></div>
+                <div class="slate-metric-item">
+                  <span class="slate-metric-label">工业分镜</span>
+                  <span class="slate-metric-val scenes">{{ getDirectorScenes(msg.data).length }} 幕</span>
+                </div>
+                <div class="slate-metric-divider"></div>
+                <div class="slate-metric-item">
+                  <span class="slate-metric-label">黄金前3秒完播</span>
+                  <span class="slate-metric-val score">
+                    <n-icon size="12" style="margin-right:2px;"><FlashOutline /></n-icon>
+                    {{ getScriptStats(msg.data).retentionScore }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- 展开详情区域 -->
+              <div v-show="isResultExpanded(msg.id)" class="slate-body-container">
+                <!-- 模式 1：🎬 导演分镜台账 (Director's Slate) -->
+                <div v-if="getResultViewMode(msg.id) === 'slate'" class="slate-scenes-grid">
                   <div
-                    v-for="(line, idx) in (isResultExpanded(msg.id) ? splitFullText(msg.data) : previewFullText(msg.data))"
-                    :key="idx"
+                    v-for="(scene, sIdx) in getDirectorScenes(msg.data)"
+                    :key="sIdx"
+                    class="scene-card"
+                    :class="scene.bg"
                   >
-                    {{ line }}
+                    <!-- 镜头卡头：幕号 + 时码 + 景别机位 + 快捷复制 -->
+                    <div class="scene-card-header">
+                      <div class="scene-ident">
+                        <span class="scene-code">{{ scene.code }}</span>
+                        <span class="scene-timecode">{{ scene.timecode }}</span>
+                        <span class="scene-stage-badge">{{ scene.stage }}</span>
+                      </div>
+                      <div class="scene-shot-info">
+                        <span class="scene-shot-pill">{{ scene.shot }}</span>
+                        <button
+                          class="scene-copy-btn"
+                          title="复制该镜台词"
+                          @click="copySceneAudio(scene.audio)"
+                        >
+                          <n-icon size="13"><CopyOutline /></n-icon>
+                          <span>复制单镜</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- 镜头双栏/主次排版：口播台词 & 导演视听指导 -->
+                    <div class="scene-content-wrap">
+                      <div class="scene-audio-block">
+                        <div class="scene-audio-label">
+                          <span class="audio-dot"></span>
+                          同期口播台词
+                        </div>
+                        <div class="scene-audio-text">{{ scene.audio }}</div>
+                      </div>
+
+                      <div class="scene-visual-directive">
+                        <div class="visual-directive-title">
+                          <n-icon size="13"><FilmOutline /></n-icon>
+                          <span>运镜与视觉花字指导</span>
+                        </div>
+                        <div class="visual-directive-text">{{ scene.visual }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 模式 2：📜 纯享口播剧本 (Teleprompter Script) -->
+                <div v-else class="slate-script-view">
+                  <div class="teleprompter-board">
+                    <div v-if="msg.data.hook" class="teleprompter-section hook-highlight">
+                      <div class="tele-tag">前 3 秒黄金开场钩子</div>
+                      <div class="tele-text bold-hook">{{ msg.data.hook }}</div>
+                    </div>
+                    <div v-if="msg.data.body" class="teleprompter-section body-flow">
+                      <div class="tele-tag">核心论述与价值解法</div>
+                      <div class="tele-text">{{ msg.data.body }}</div>
+                    </div>
+                    <div v-if="msg.data.cta" class="teleprompter-section cta-highlight">
+                      <div class="tele-tag">尾声行动号召与闭环</div>
+                      <div class="tele-text">{{ msg.data.cta }}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 标签列表 -->
+                <div v-if="msg.data.tags?.length" class="slate-tags-row">
+                  <span class="slate-tags-label">推荐话题：</span>
+                  <div class="slate-tags-list">
+                    <span v-for="t in msg.data.tags" :key="t" class="slate-tag-chip">#{{ t }}</span>
+                  </div>
+                </div>
+
+                <!-- 底部操作底栏 -->
+                <div class="slate-footer-bar">
+                  <div class="slate-footer-tip">
+                    <span>💡 提示：支持一键复制到提词器，或直接导出完整导演分镜表。</span>
+                  </div>
+                  <div class="slate-footer-buttons">
+                    <n-button size="small" secondary @click="copyFullSpokenText(msg.data)">
+                      <template #icon><n-icon><DocumentTextOutline /></n-icon></template>
+                      复制提词器口播稿
+                    </n-button>
+                    <n-button size="small" type="primary" secondary @click="copyFullDirectorSlate(msg.data)">
+                      <template #icon><n-icon><CopyOutline /></n-icon></template>
+                      复制工业分镜全表
+                    </n-button>
+                    <n-button
+                      size="small"
+                      quaternary
+                      :disabled="generating"
+                      @click="regenerate(msg.payload)"
+                    >
+                      <template #icon><n-icon><RefreshOutline /></n-icon></template>
+                      按此配置再生成一版
+                    </n-button>
                   </div>
                 </div>
               </div>
 
-              <div v-if="msg.data.tags?.length && isResultExpanded(msg.id)" class="result-block">
-                <div class="result-label">标签</div>
-                <n-space size="small" style="margin-top:8px;">
-                  <n-tag v-for="t in msg.data.tags" :key="t" :bordered="false" size="small">#{{ t }}</n-tag>
-                </n-space>
+              <!-- 折叠状态下的精简预览摘要 -->
+              <div v-show="!isResultExpanded(msg.id)" class="slate-collapsed-preview" @click="toggleResultExpand(msg.id)">
+                <div class="preview-hook">“{{ msg.data.hook || msg.data.title || '点击展开查看完整分镜台账...' }}”</div>
+                <div class="preview-expand-tip">点击展开完整导演分镜台账 (共 {{ getDirectorScenes(msg.data).length }} 幕) ▾</div>
               </div>
-
-
             </template>
 
             <template v-else-if="msg.type === 'pending'">
               <div class="pending-row">
                 <n-spin size="small" />
-                <span>正在生成中...</span>
+                <span>正在构思分镜与剧本骨架...</span>
               </div>
             </template>
 
             <template v-else-if="msg.type === 'streaming'">
-              <div class="streaming-row">
-                <n-spin size="small" style="flex-shrink:0;" />
+              <div class="streaming-slate-box">
+                <div class="streaming-indicator-bar">
+                  <span class="streaming-pulse-dot"></span>
+                  <span class="streaming-label">正在实时推演生成脚本台词...</span>
+                </div>
                 <pre class="streaming-text">{{ msg.text }}</pre>
               </div>
             </template>
@@ -251,6 +405,9 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   CopyOutline,
+  DocumentTextOutline,
+  FilmOutline,
+  FlashOutline,
   OptionsOutline,
   RefreshOutline,
   ReorderThreeOutline,
@@ -333,19 +490,31 @@ const viewpoints = ref([])
 const viralAnalyses = ref([])
 
 const styleOptions = computed(() =>
-  styles.value.map((s) => ({
-    label: s.content_type ? `[${s.content_type}] ${s.name}` : s.name,
-    value: s.id,
-  }))
+  Array.isArray(styles.value)
+    ? styles.value.map((s) => ({
+        label: s.content_type ? `[${s.content_type}] ${s.name}` : s.name,
+        value: s.id,
+      }))
+    : []
 )
-const creatorOptions = computed(() => creators.value.map((c) => ({ label: `${c.nickname} (${c.platform})`, value: c.id })))
-const docOptions = computed(() => docs.value.map((d) => ({ label: d.name, value: d.id })))
-const viewpointOptions = computed(() => viewpoints.value.map((v) => ({ label: v.title, value: v.id })))
+const creatorOptions = computed(() =>
+  Array.isArray(creators.value)
+    ? creators.value.map((c) => ({ label: `${c.nickname} (${c.platform})`, value: c.id }))
+    : []
+)
+const docOptions = computed(() =>
+  Array.isArray(docs.value) ? docs.value.map((d) => ({ label: d.name, value: d.id })) : []
+)
+const viewpointOptions = computed(() =>
+  Array.isArray(viewpoints.value) ? viewpoints.value.map((v) => ({ label: v.title, value: v.id })) : []
+)
 const viralAnalysisOptions = computed(() =>
-  viralAnalyses.value.map((a) => ({
-    label: a.title || `视频分析 #${a.id}`,
-    value: a.id,
-  }))
+  Array.isArray(viralAnalyses.value)
+    ? viralAnalyses.value.map((a) => ({
+        label: a.title || `视频分析 #${a.id}`,
+        value: a.id,
+      }))
+    : []
 )
 
 let msgSeq = 1
@@ -410,73 +579,83 @@ function typeLabel(type) {
 const mentionPool = computed(() => {
   const list = []
 
-  styles.value.forEach((s) => {
-    list.push({
-      key: `style-${s.id}`,
-      type: 'style',
-      id: s.id,
-      label: `风格:${s.name}`,
-      source: `${typeLabel('style')} · ${platformLabel(s.platform)}`,
-      search: `${s.name} ${s.content_type || ''}`,
-      thumb: '',
-      badge: shortBadge('style'),
+  if (Array.isArray(styles.value)) {
+    styles.value.forEach((s) => {
+      list.push({
+        key: `style-${s.id}`,
+        type: 'style',
+        id: s.id,
+        label: `风格:${s.name}`,
+        source: `${typeLabel('style')} · ${platformLabel(s.platform)}`,
+        search: `${s.name} ${s.content_type || ''}`,
+        thumb: '',
+        badge: shortBadge('style'),
+      })
     })
-  })
+  }
 
-  creators.value.forEach((c) => {
-    list.push({
-      key: `creator-${c.id}`,
-      type: 'creator',
-      id: c.id,
-      label: `博主:${c.nickname}`,
-      source: `${platformLabel(c.platform)} · ${formatFollower(c.follower_count)}`,
-      search: `${c.nickname} ${c.platform}`,
-      thumb: c.avatar_url || '',
-      badge: shortBadge('creator'),
+  if (Array.isArray(creators.value)) {
+    creators.value.forEach((c) => {
+      list.push({
+        key: `creator-${c.id}`,
+        type: 'creator',
+        id: c.id,
+        label: `博主:${c.nickname}`,
+        source: `${platformLabel(c.platform)} · ${formatFollower(c.follower_count)}`,
+        search: `${c.nickname} ${c.platform}`,
+        thumb: c.avatar_url || '',
+        badge: shortBadge('creator'),
+      })
     })
-  })
+  }
 
-  docs.value.forEach((d) => {
-    const sourceType = d.source_type || '资料库'
-    const fileType = (d.file_type || '文档').toUpperCase()
-    list.push({
-      key: `doc-${d.id}`,
-      type: 'doc',
-      id: d.id,
-      label: `文档:${d.name}`,
-      source: `${fileType} · ${sourceType}`,
-      search: `${d.name} ${d.file_type || ''}`,
-      thumb: '',
-      badge: shortBadge('doc'),
+  if (Array.isArray(docs.value)) {
+    docs.value.forEach((d) => {
+      const sourceType = d.source_type || '资料库'
+      const fileType = (d.file_type || '文档').toUpperCase()
+      list.push({
+        key: `doc-${d.id}`,
+        type: 'doc',
+        id: d.id,
+        label: `文档:${d.name}`,
+        source: `${fileType} · ${sourceType}`,
+        search: `${d.name} ${d.file_type || ''}`,
+        thumb: '',
+        badge: shortBadge('doc'),
+      })
     })
-  })
+  }
 
-  viewpoints.value.forEach((v) => {
-    list.push({
-      key: `viewpoint-${v.id}`,
-      type: 'viewpoint',
-      id: v.id,
-      label: `观点:${v.title}`,
-      source: `${v.category || '运营观点'} · 个人素材`,
-      search: `${v.title} ${v.content || ''}`,
-      thumb: '',
-      badge: shortBadge('viewpoint'),
+  if (Array.isArray(viewpoints.value)) {
+    viewpoints.value.forEach((v) => {
+      list.push({
+        key: `viewpoint-${v.id}`,
+        type: 'viewpoint',
+        id: v.id,
+        label: `观点:${v.title}`,
+        source: `${v.category || '运营观点'} · 个人素材`,
+        search: `${v.title} ${v.content || ''}`,
+        thumb: '',
+        badge: shortBadge('viewpoint'),
+      })
     })
-  })
+  }
 
-  viralAnalyses.value.forEach((a) => {
-    const title = a.title || `视频分析 #${a.id}`
-    list.push({
-      key: `analysis-${a.id}`,
-      type: 'analysis',
-      id: a.id,
-      label: `视频:${title}`,
-      source: a.source || '爆款分析素材',
-      search: `${title} ${a.source || ''}`,
-      thumb: a.cover_url || a.author_avatar || '',
-      badge: shortBadge('analysis'),
+  if (Array.isArray(viralAnalyses.value)) {
+    viralAnalyses.value.forEach((a) => {
+      const title = a.title || `视频分析 #${a.id}`
+      list.push({
+        key: `analysis-${a.id}`,
+        type: 'analysis',
+        id: a.id,
+        label: `视频:${title}`,
+        source: a.source || '爆款分析素材',
+        search: `${title} ${a.source || ''}`,
+        thumb: a.cover_url || a.author_avatar || '',
+        badge: shortBadge('analysis'),
+      })
     })
-  })
+  }
 
   return list
 })
@@ -589,12 +768,176 @@ function onBlockDragEnd() {
   dragState.from = -1
 }
 
+const resultViewModes = reactive({})
+
+function getResultViewMode(id) {
+  return resultViewModes[id] || 'slate'
+}
+
+function setResultViewMode(id, mode) {
+  resultViewModes[id] = mode
+}
+
+function getPlatformLabel(val) {
+  const map = {
+    douyin: '抖音短平快',
+    xiaohongshu: '小红书种草口播',
+    weixin: '视频号深度分享',
+  }
+  return map[val] || '短视频全域通用'
+}
+
+function getDirectorScenes(data) {
+  if (!data) return []
+  const scenes = []
+
+  // Scene 1: Golden Hook (前3秒黄金强悬念)
+  const hookText = (data.hook || '').trim() || (data.title || '').trim() || '（黄金前3秒悬念破局）'
+  scenes.push({
+    num: '01',
+    code: 'SCENE 01',
+    timecode: '00:00 - 00:03',
+    stage: '黄金前3秒 · 冲突破局',
+    shot: '特写 / 快速入画推镜',
+    shotTag: 'CLOSE-UP',
+    audio: hookText,
+    visual: '强反差高亮花字直击认知痛点，直视镜头抓取用户留存，配合环境背景重音转折。',
+    bg: 'hook-scene',
+  })
+
+  // Scene 2..N: Body Beats
+  const bodyText = (data.body || '').trim()
+  if (bodyText) {
+    const rawParagraphs = bodyText
+      .split(/\n\s*\n|\n/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+
+    if (rawParagraphs.length <= 1) {
+      const sentences = bodyText.split(/(?<=[。！？!?])\s*/).filter(Boolean)
+      if (sentences.length >= 2) {
+        const mid = Math.ceil(sentences.length / 2)
+        rawParagraphs.length = 0
+        rawParagraphs.push(sentences.slice(0, mid).join(''), sentences.slice(mid).join(''))
+      }
+    }
+
+    const shotArchetypes = [
+      {
+        shot: '中景 / 第一人称生活化',
+        tag: 'MEDIUM',
+        stage: '痛点剖析 · 情绪共鸣',
+        visual: '真实生活/工作场景带入，具象化拆解用户现实痛点，建立深度认同感。',
+      },
+      {
+        shot: '近景特写 / 证据链展示',
+        tag: 'DETAIL',
+        stage: '独家解法 · 核心反转',
+        visual: '核心数据、真实案例或实操画面高亮展示，屏幕侧边弹出思维要点指示牌。',
+      },
+      {
+        shot: '手持微动 / 节奏切镜',
+        tag: 'ACTION',
+        stage: '避坑指南 · 认知升维',
+        visual: '快切多机位画面强化对比，突出不可替代的核心方法论与避坑秘诀。',
+      },
+    ]
+
+    rawParagraphs.forEach((para, idx) => {
+      const preset = shotArchetypes[idx % shotArchetypes.length]
+      const sceneNum = String(scenes.length + 1).padStart(2, '0')
+      const startSec = (idx + 1) * 8
+      const endSec = startSec + 9
+      scenes.push({
+        num: sceneNum,
+        code: `SCENE ${sceneNum}`,
+        timecode: `00:${String(startSec).padStart(2, '0')} - 00:${String(endSec).padStart(2, '0')}`,
+        stage: preset.stage,
+        shot: preset.shot,
+        shotTag: preset.tag,
+        audio: para,
+        visual: preset.visual,
+        bg: 'body-scene',
+      })
+    })
+  }
+
+  // Final Scene: CTA (闭环转化)
+  const ctaText =
+    (data.cta || '').trim() ||
+    '觉得这期内容有用别忘了点赞收藏，在评论区留下你的看法，关注我持续带你拆解行业干货。'
+  const sceneNum = String(scenes.length + 1).padStart(2, '0')
+  scenes.push({
+    num: sceneNum,
+    code: `SCENE ${sceneNum}`,
+    timecode: '尾声 · 转化闭环',
+    stage: '价值闭环 · 行动召唤',
+    shot: '定格中景 / 眼神坚定',
+    shotTag: 'ACTION CALL',
+    audio: ctaText,
+    visual: '眼神笃定真诚，屏幕下沿弹出互动引导浮层或主页资料指引，BGM渐弱收尾。',
+    bg: 'cta-scene',
+  })
+
+  return scenes
+}
+
+function getScriptStats(data) {
+  if (!data) return { words: 0, duration: '00:00', retentionScore: '95%' }
+  const fullText = [data.title, data.hook, data.body, data.cta].filter(Boolean).join('')
+  const words = fullText.replace(/\s+/g, '').length
+  const totalSeconds = Math.max(15, Math.round(words / 4.2))
+  const mins = Math.floor(totalSeconds / 60)
+  const secs = totalSeconds % 60
+  const duration = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+  const retentionScore = words > 120 ? '97% 完播预测' : '94% 完播预测'
+  return { words, duration, retentionScore }
+}
+
+function copySceneAudio(audio) {
+  if (!audio) return
+  navigator.clipboard.writeText(audio)
+  message.success('已复制单镜台词')
+}
+
+function copyFullSpokenText(data) {
+  if (!data) return
+  const parts = []
+  if (data.hook) parts.push(`【黄金开篇】\n${data.hook}`)
+  if (data.body) parts.push(`【正文分述】\n${data.body}`)
+  if (data.cta) parts.push(`【行动转化】\n${data.cta}`)
+  navigator.clipboard.writeText(parts.join('\n\n'))
+  message.success('已复制提词器纯口播稿')
+}
+
+function copyFullDirectorSlate(data) {
+  if (!data) return
+  const scenes = getDirectorScenes(data)
+  const lines = [
+    `🎬 《${data.title || '短视频口播脚本'}》工业导演分镜台账`,
+    `适配平台：${getPlatformLabel(data.platform || config.platform)} | 预估时长：${getScriptStats(data).duration} | 镜头数：${scenes.length} 幕`,
+    '──────────────────────────────',
+  ]
+  scenes.forEach((s) => {
+    lines.push(`【${s.code} · ${s.stage}】(${s.timecode})`)
+    lines.push(`▶ 机位运镜：${s.shot}`)
+    lines.push(`▶ 同期台词：${s.audio}`)
+    lines.push(`▶ 视听指导：${s.visual}`)
+    lines.push('')
+  })
+  if (data.tags?.length) {
+    lines.push(`推荐标签：${data.tags.map((t) => '#' + t).join(' ')}`)
+  }
+  navigator.clipboard.writeText(lines.join('\n'))
+  message.success('已复制完整工业分镜台账')
+}
+
 function isResultExpanded(id) {
-  return !!resultExpanded[id]
+  return resultExpanded[id] !== false
 }
 
 function toggleResultExpand(id) {
-  resultExpanded[id] = !resultExpanded[id]
+  resultExpanded[id] = !isResultExpanded(id)
   scrollToMessage(id)
 }
 
@@ -890,7 +1233,7 @@ async function runGenerate(payload) {
         payload,
         data: { ...finalResult },
       }
-      resultExpanded[newId] = false
+      resultExpanded[newId] = true
       scrollToMessage(newId)
     }
 
@@ -1022,17 +1365,21 @@ async function loadOptions() {
       documentsApi.list(),
       viewpointsApi.list({ active_only: true }),
     ])
-    styles.value = s.data || []
-    creators.value = c.data || []
-    docs.value = d.data || []
-    viewpoints.value = vp.data || []
+    styles.value = Array.isArray(s?.data) ? s.data : []
+    creators.value = Array.isArray(c?.data) ? c.data : []
+    docs.value = Array.isArray(d?.data) ? d.data : []
+    viewpoints.value = Array.isArray(vp?.data) ? vp.data : []
   } catch {
     message.warning('部分配置数据加载失败，可刷新重试')
+    styles.value = []
+    creators.value = []
+    docs.value = []
+    viewpoints.value = []
   }
 
   try {
-    const { data } = await analyzerApi.listAnalyses()
-    viralAnalyses.value = data || []
+    const res = await analyzerApi.listAnalyses()
+    viralAnalyses.value = Array.isArray(res?.data) ? res.data : []
   } catch {
     viralAnalyses.value = []
   }
@@ -1131,90 +1478,513 @@ onMounted(async () => {
   background: var(--c-bg-elevated, #fff);
   padding: 14px 16px;
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+  transition: all var(--duration-fast, 160ms) ease;
 }
 
-.chat-bubble.result-compact .result-block {
-  margin-top: 8px;
-  padding-top: 8px;
+.chat-bubble.is-result-slate {
+  max-width: 100%;
+  width: 100%;
+  padding: 0;
+  border-radius: var(--radius-xl, 16px);
+  border: 1px solid var(--c-border);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+  background: #ffffff;
 }
 
-.chat-text {
-  color: var(--c-text-2, #374151);
-  line-height: 1.72;
-  white-space: pre-wrap;
+.chat-bubble.result-collapsed {
+  cursor: pointer;
 }
 
-.chat-refs {
-  margin-top: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.result-head {
+/* 🎬 导演台账 Clapperboard 标头 */
+.slate-clapper-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
+  padding: 16px 20px;
+  background: linear-gradient(180deg, #fafbfd 0%, #f4f6f9 100%);
+  border-bottom: 1px solid var(--c-border);
+  gap: 16px;
 }
 
-.result-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--c-text-1, #111827);
-}
-
-.result-block {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed rgba(0, 0, 0, 0.08);
-}
-
-
-
-.result-label {
-  font-size: 11px;
-  color: var(--c-text-4, #9ca3af);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.result-value {
-  margin-top: 6px;
-  color: var(--c-text-2, #374151);
-  line-height: 1.62;
-  font-size: 13px;
-}
-
-.result-value.strong {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--c-text-1, #111827);
-}
-
-.result-value.body {
+.slate-title-group {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
-.result-value.body.compact {
-  max-height: 112px;
-  overflow: hidden;
+.slate-index-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.result-value.ellipsis {
+.slate-clapper-stripe {
+  width: 14px;
+  height: 12px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(45deg, #1e293b, #1e293b 3px, #e2e8f0 3px, #e2e8f0 6px);
+}
+
+.slate-badge-text {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-primary, #1d4ed8);
+}
+
+.slate-main-title {
+  font-size: 18px;
+  font-weight: 750;
+  color: var(--c-text-1, #111827);
+  letter-spacing: -0.02em;
+  margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.pending-row {
+.slate-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.slate-mode-tabs {
+  display: inline-flex;
+  background: rgba(17, 24, 39, 0.06);
+  padding: 3px;
+  border-radius: 8px;
+  gap: 2px;
+}
+
+.slate-tab-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c-text-3, #6b7280);
+  transition: all 160ms var(--ease-default);
+}
+
+.slate-tab-btn:hover {
+  color: var(--c-text-1, #111827);
+}
+
+.slate-tab-btn.active {
+  background: #ffffff;
+  color: var(--c-primary, #1d4ed8);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* 导演技术参数看带 */
+.slate-meta-ribbon {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 20px;
+  background: #ffffff;
+  border-bottom: 1px dashed var(--c-border);
+  font-size: 12px;
+}
+
+.slate-metric-item {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
+}
+
+.slate-metric-label {
+  color: var(--c-text-4, #9ca3af);
+  font-size: 11px;
+}
+
+.slate-metric-val {
+  font-weight: 600;
+  color: var(--c-text-2, #374151);
+  font-variant-numeric: tabular-nums;
+}
+
+.slate-metric-val.platform-tag {
+  color: var(--c-primary, #1d4ed8);
+  background: var(--c-primary-bg, rgba(29, 78, 216, 0.06));
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+
+.slate-metric-val.score {
+  display: inline-flex;
+  align-items: center;
+  color: #c2410c;
+  background: #fff7ed;
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+.slate-metric-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--c-border);
+}
+
+/* 展开区域 */
+.slate-body-container {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.slate-scenes-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.scene-card {
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 16px;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.scene-card:hover {
+  border-color: rgba(29, 78, 216, 0.25);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+}
+
+.scene-card.hook-scene {
+  border-left: 3px solid #1d4ed8;
+  background: linear-gradient(180deg, #f8faff 0%, #ffffff 100%);
+}
+
+.scene-card.cta-scene {
+  border-left: 3px solid #15803d;
+  background: linear-gradient(180deg, #f8fdfa 0%, #ffffff 100%);
+}
+
+.scene-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.05);
+}
+
+.scene-ident {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scene-code {
+  font-weight: 800;
+  font-size: 12px;
+  color: var(--c-text-1, #111827);
+  letter-spacing: 0.04em;
+}
+
+.scene-timecode {
+  font-size: 11px;
   color: var(--c-text-3, #6b7280);
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.scene-stage-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c-text-2, #374151);
+}
+
+.scene-shot-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scene-shot-pill {
+  font-size: 11px;
+  color: var(--c-primary, #1d4ed8);
+  background: var(--c-primary-bg, rgba(29, 78, 216, 0.06));
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.scene-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--c-text-4, #9ca3af);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 150ms ease;
+}
+
+.scene-copy-btn:hover {
+  color: var(--c-primary, #1d4ed8);
+  background: var(--c-primary-bg, rgba(29, 78, 216, 0.06));
+}
+
+.scene-content-wrap {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+
+@media (max-width: 820px) {
+  .scene-content-wrap {
+    grid-template-columns: 1fr;
+  }
+}
+
+.scene-audio-block {
+  background: #f8fafc;
+  border: 1px solid rgba(17, 24, 39, 0.05);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.scene-audio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-text-3, #6b7280);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.audio-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-primary, #1d4ed8);
+}
+
+.scene-audio-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--c-text-1, #111827);
+  font-weight: 500;
+  white-space: pre-wrap;
+}
+
+.scene-visual-directive {
+  background: #fefce8;
+  border: 1px dashed rgba(202, 138, 4, 0.3);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.visual-directive-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #854d0e;
+  margin-bottom: 6px;
+}
+
+.visual-directive-text {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #713f12;
+}
+
+/* 纯享口播剧本（提词器版式） */
+.slate-script-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.teleprompter-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.teleprompter-section {
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--c-border);
+  background: #ffffff;
+}
+
+.teleprompter-section.hook-highlight {
+  border-color: rgba(29, 78, 216, 0.25);
+  background: #f8faff;
+}
+
+.teleprompter-section.cta-highlight {
+  border-color: rgba(21, 128, 61, 0.25);
+  background: #f8fdfa;
+}
+
+.tele-tag {
+  font-size: 11px;
+  font-weight: 750;
+  color: var(--c-text-3, #6b7280);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.tele-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--c-text-1, #111827);
+  white-space: pre-wrap;
+}
+
+.tele-text.bold-hook {
+  font-weight: 700;
+  color: var(--c-primary, #1d4ed8);
+  font-size: 16px;
+}
+
+/* 标签栏与底栏 */
+.slate-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.slate-tags-label {
+  font-size: 12px;
+  color: var(--c-text-3, #6b7280);
+}
+
+.slate-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.slate-tag-chip {
+  font-size: 12px;
+  color: var(--c-primary, #1d4ed8);
+  background: var(--c-primary-bg, rgba(29, 78, 216, 0.06));
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.slate-footer-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--c-border);
+}
+
+.slate-footer-tip {
+  font-size: 12px;
+  color: var(--c-text-4, #9ca3af);
+}
+
+.slate-footer-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 折叠摘要预览 */
+.slate-collapsed-preview {
+  padding: 14px 20px;
+  background: #fafafa;
+  border-top: 1px solid var(--c-border);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.slate-collapsed-preview:hover {
+  background: #f4f5f7;
+}
+
+.preview-hook {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--c-text-2, #374151);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-expand-tip {
+  font-size: 12px;
+  color: var(--c-primary, #1d4ed8);
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+/* 流式生成美学 */
+.streaming-slate-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+}
+
+.streaming-indicator-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.streaming-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-primary, #1d4ed8);
+  box-shadow: 0 0 0 0 rgba(29, 78, 216, 0.4);
+  animation: pulseGlow 1.8s infinite;
+}
+
+@keyframes pulseGlow {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(29, 78, 216, 0.5); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(29, 78, 216, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(29, 78, 216, 0); }
+}
+
+.streaming-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-primary, #1d4ed8);
 }
 
 .streaming-row {

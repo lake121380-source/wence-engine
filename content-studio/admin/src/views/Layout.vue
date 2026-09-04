@@ -56,6 +56,7 @@ import {
   PeopleOutline,
   CardOutline,
   DocumentTextOutline,
+  AnalyticsOutline,
   SettingsOutline,
 } from '@vicons/ionicons5'
 
@@ -71,12 +72,21 @@ const activeKey = computed(() => {
   if (path.startsWith('/users')) return 'users'
   if (path.startsWith('/orders')) return 'orders'
   if (path.startsWith('/content')) return 'content'
+  if (path.startsWith('/analytics')) return 'analytics'
   if (path.startsWith('/settings')) return 'settings'
   return 'dashboard'
 })
 
 const currentTitle = computed(() => {
-  const map = { dashboard: '数据概览', tenants: '租户管理', users: '用户管理', orders: '订单记录', content: '内容管理', settings: '系统设置' }
+  const map = {
+    dashboard: '数据概览',
+    tenants: '租户管理',
+    users: '用户管理',
+    orders: '订单记录',
+    content: '内容管理',
+    analytics: '生成分析与引擎指标',
+    settings: '系统设置',
+  }
   return map[activeKey.value] || '数据概览'
 })
 
@@ -90,6 +100,7 @@ const menuOptions = [
   { label: '用户管理', key: 'users', icon: renderIcon(PeopleOutline) },
   { label: '订单记录', key: 'orders', icon: renderIcon(CardOutline) },
   { label: '内容管理', key: 'content', icon: renderIcon(DocumentTextOutline) },
+  { label: '生成分析', key: 'analytics', icon: renderIcon(AnalyticsOutline) },
   { label: '系统设置', key: 'settings', icon: renderIcon(SettingsOutline) },
 ]
 

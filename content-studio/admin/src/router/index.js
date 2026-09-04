@@ -18,6 +18,8 @@ const routes = [
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'orders', name: 'Orders', component: () => import('../views/Orders.vue') },
       { path: 'content', name: 'Content', component: () => import('../views/Content.vue') },
+      { path: 'analytics', name: 'GenerationAnalytics', component: () => import('../views/GenerationAnalytics.vue') },
+      { path: 'content/analytics', redirect: '/analytics' },
       { path: 'settings', name: 'AdminSettings', component: () => import('../views/AdminSettings.vue') },
     ],
   },

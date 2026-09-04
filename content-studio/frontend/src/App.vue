@@ -439,27 +439,29 @@ function handleMobileNavigate(path) {
 
 const themeOverrides = {
   common: {
-    primaryColor: '#2563EB',
-    primaryColorHover: '#3B82F6',
-    primaryColorPressed: '#1D4ED8',
-    primaryColorSuppl: '#2563EB',
-    infoColor: '#0ea5e9',
-    successColor: '#16a34a',
-    warningColor: '#ea580c',
-    errorColor: '#dc2626',
+    primaryColor: '#1d4ed8',
+    primaryColorHover: '#2563eb',
+    primaryColorPressed: '#1e40af',
+    primaryColorSuppl: '#1d4ed8',
+    infoColor: '#0284c7',
+    successColor: '#15803d',
+    warningColor: '#c2410c',
+    errorColor: '#b91c1c',
     borderRadius: '8px',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
   },
   DataTable: {
-    thColor: '#f8fafc',
+    thColor: '#f8f9fa',
     tdColor: '#ffffff',
   },
   Button: {
     borderRadiusMedium: '8px',
     borderRadiusSmall: '6px',
+    fontWeight: '500',
   },
   Card: {
     borderRadius: '12px',
+    borderColor: 'rgba(17, 24, 39, 0.07)',
   },
 }
 
@@ -597,29 +599,30 @@ function jumpCmd(item) {
    全局色彩、间距与圆角设计系统
    ══════════════════════════════════════════════ */
 :root {
-  --c-primary: #2563EB;
-  --c-primary-hover: #3B82F6;
-  --c-primary-pressed: #1D4ED8;
-  --c-primary-bg: rgba(37, 99, 235, 0.06);
-  --c-primary-bg-hover: rgba(37, 99, 235, 0.10);
-  --c-primary-shadow: rgba(37, 99, 235, 0.20);
+  --c-primary: #1d4ed8;
+  --c-primary-hover: #2563eb;
+  --c-primary-pressed: #1e40af;
+  --c-primary-bg: rgba(29, 78, 216, 0.05);
+  --c-primary-bg-hover: rgba(29, 78, 216, 0.09);
+  --c-primary-shadow: rgba(29, 78, 216, 0.16);
 
-  --c-success: #16a34a;
-  --c-warning: #ea580c;
-  --c-error: #dc2626;
-  --c-info: #0ea5e9;
+  --c-success: #15803d;
+  --c-warning: #c2410c;
+  --c-error: #b91c1c;
+  --c-info: #0284c7;
 
-  --c-text-1: #0f172a;
-  --c-text-2: #334155;
-  --c-text-3: #64748b;
-  --c-text-4: #94a3b8;
-  --c-text-5: #cbd5e1;
+  --c-text-1: #111827;
+  --c-text-2: #374151;
+  --c-text-3: #6b7280;
+  --c-text-4: #9ca3af;
+  --c-text-5: #e5e7eb;
 
-  --c-border: rgba(15, 23, 42, 0.08);
-  --c-border-hover: rgba(15, 23, 42, 0.16);
-  --c-bg-page: #f8fafc;
+  --c-border: rgba(17, 24, 39, 0.07);
+  --c-border-hover: rgba(17, 24, 39, 0.14);
+  --c-bg-page: #f8f9fa;
   --c-bg-elevated: #ffffff;
-  --c-bg-glass: rgba(255, 255, 255, 0.94);
+  --c-bg-soft: #f3f4f6;
+  --c-bg-glass: rgba(255, 255, 255, 0.88);
 
   --space-xs: 4px;
   --space-sm: 8px;
@@ -633,9 +636,9 @@ function jumpCmd(item) {
   --radius-lg: 12px;
   --radius-xl: 16px;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 10px 24px -4px rgba(0, 0, 0, 0.08);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 16px -2px rgba(0, 0, 0, 0.04), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
+  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.06);
 
   --ease-default: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 160ms;
@@ -653,6 +656,8 @@ body {
   color: var(--c-text-1);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-variant-numeric: tabular-nums;
   background: var(--c-bg-page);
   min-height: 100vh;
   margin: 0;
@@ -723,12 +728,12 @@ body {
   width: 36px;
   height: 36px;
   flex-shrink: 0;
-  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.25);
 }
 
 .logo-brand-info {
@@ -806,19 +811,19 @@ body {
 }
 
 .nav-item.active {
-  background: #eff6ff;
-  color: #2563eb;
-  font-weight: 650;
+  background: var(--c-primary-bg, rgba(29, 78, 216, 0.05));
+  color: var(--c-primary, #1d4ed8);
+  font-weight: 600;
 }
 
 .nav-item.active::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 6px;
-  bottom: 6px;
+  top: 8px;
+  bottom: 8px;
   width: 3px;
-  background: #2563eb;
+  background: var(--c-primary, #1d4ed8);
   border-radius: 0 3px 3px 0;
 }
 
@@ -1198,14 +1203,14 @@ body {
 .page-title {
   font-size: 22px;
   font-weight: 750;
-  color: #0f172a;
+  color: var(--c-text-1, #111827);
   margin: 0;
   letter-spacing: -0.02em;
 }
 
 .page-subtitle {
   font-size: 13.5px;
-  color: #64748b;
+  color: var(--c-text-3, #6b7280);
   margin-top: 4px;
 }
 

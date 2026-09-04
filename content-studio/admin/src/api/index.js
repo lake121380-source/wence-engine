@@ -70,6 +70,7 @@ export const contentApi = {
   creators: (params) => api.get('/creators', { params }),
   topics: (params) => api.get('/topics', { params }),
   generations: (params) => api.get('/generations', { params }),
+  analytics: (params) => api.get('/generations/analytics', { params }),
 }
 
 export const exportApi = {
