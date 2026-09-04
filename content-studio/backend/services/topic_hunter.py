@@ -79,6 +79,41 @@ def _fetch_srt_url(subtitle_infos: list) -> str:
         return ""
 
 
+def _find_media_url(value, media_context: bool = False) -> str:
+    """从平台详情嵌套结构提取媒体直链，不返回封面或分享页。"""
+    if isinstance(value, dict):
+        for key in ("play_url", "download_url", "video_url", "audio_url"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                return candidate
+        for key in ("url_list", "urls"):
+            candidates = value.get(key)
+            if isinstance(candidates, list):
+                for candidate in candidates:
+                    if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                        return candidate
+                    found = _find_media_url(candidate, media_context=True)
+                    if found:
+                        return found
+        for key, child in value.items():
+            if key in {"cover", "dynamic_cover", "origin_cover", "avatar", "share_info"}:
+                continue
+            if key == "url" and media_context and isinstance(child, str) and child.startswith(("http://", "https://")):
+                return child
+            found = _find_media_url(
+                child,
+                media_context or key in {"video", "media", "video_info", "stream", "play_addr", "download_addr"},
+            )
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_media_url(child)
+            if found:
+                return found
+    return ""
+
+
 class TopicHunterService:
 
     def _match_keyword(self, video: dict, keyword: str) -> bool:
@@ -446,6 +481,7 @@ class TopicHunterService:
                     "script": transcript,
                     "caption": v.get("desc", ""),   # 博主手动输入的文案描述
                     "share_url": (v.get("share_info") or {}).get("share_url", ""),
+                    "video_url": play_url,
                 }
             except Exception as e:
                 print(f"[TopicHunter] douyin detail error: {e}")
@@ -470,6 +506,24 @@ class TopicHunterService:
 
         elif platform == "xiaohongshu":
             try:
+                # 列表中通常只有 explore 网页地址；详情接口里才可能包含视频直链。
+                raw_detail = await tikhub.xhs_get_note_detail(video_id)
+                detail_root = raw_detail.get("data", {}) or {}
+                note_root = detail_root.get("note") or detail_root.get("note_card") or {}
+                detail_data["caption"] = (
+                    detail_root.get("desc") or detail_root.get("description")
+                    or note_root.get("desc") or note_root.get("description") or ""
+                )
+                detail_data["video_url"] = _find_media_url(detail_root)
+                if detail_data["video_url"]:
+                    from services.transcribe import transcribe_service
+                    detail_data["script"] = await transcribe_service.transcribe_from_url(
+                        detail_data["video_url"], video_id
+                    )
+            except Exception as e:
+                print(f"[TopicHunter] xhs detail/transcribe error: {e}")
+
+            try:
                 raw = await tikhub.xhs_get_note_comments(video_id)
                 data = raw.get("data", {})
                 raw_comments = data.get("comments") or []
@@ -489,6 +543,7 @@ class TopicHunterService:
             "script": detail_data.get("script", ""),
             "caption": detail_data.get("caption", ""),
             "share_url": detail_data.get("share_url", ""),
+            "video_url": detail_data.get("video_url", ""),
             "top_comments": comments_data[:comment_count],
         }
 

@@ -600,7 +600,9 @@
               {{ currentCVVideo.script }}
             </div>
             <div v-else class="analysis-text" style="color:#f59e0b;font-size:13px;margin-bottom:12px;">
-              尚未获取语音转录。点击「分析爆款」后系统会自动转录视频原声            </div>
+              尚未获取语音转录。请确认视频包含可访问的原声，再点击「分析爆款」重试。
+              抖音/小红书的视频地址受平台 CDN 和登录状态影响，无法保证每条视频都能自动转录。
+            </div>
             <div v-if="currentCVVideo && currentCVVideo.description" style="margin-top:12px;">
               <div style="font-size:12px;color:var(--c-text-4, #94a3b8);margin-bottom:6px;font-weight:500;">博主发布描述（手动填写的文字）</div>
               <div class="analysis-text" style="color:#cbd5e1;font-size:13px;line-height:1.7;">{{ currentCVVideo.description }}</div>

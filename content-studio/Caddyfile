@@ -73,26 +73,3 @@ http://124.221.70.55 {
         reverse_proxy frontend:80
     }
 }
-
-# Temporary plain HTTP fallback for the Hong Kong server before DNS is switched.
-http://185.243.240.30 {
-    encode gzip
-
-    redir /admin /admin/
-
-    handle /api* {
-        reverse_proxy backend:8080
-    }
-
-    handle /health {
-        reverse_proxy backend:8080
-    }
-
-    handle_path /admin/* {
-        reverse_proxy admin:80
-    }
-
-    handle {
-        reverse_proxy frontend:80
-    }
-}

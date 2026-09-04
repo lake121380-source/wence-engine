@@ -52,10 +52,17 @@ class AnalyzerService:
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}]
         )
-        return msg.content[0].text.strip()
+        if not msg or not msg.content:
+            return ""
+        for block in msg.content:
+            if hasattr(block, "type") and block.type == "text" and hasattr(block, "text"):
+                return block.text.strip()
+            if hasattr(block, "text"):
+                return block.text.strip()
+        return ""
 
     async def _async_ai(self, prompt: str, max_tokens: int = 1500) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self._call_ai(prompt, max_tokens))
 
     # ════════════════════════════════════════════════
@@ -303,7 +310,11 @@ class AnalyzerService:
             existing_script_len = len(existing_script)
             duration_s = v.duration or 60
             expected_min_chars = int(duration_s * 2)
-            need_script = existing_script_len < max(200, expected_min_chars)
+            # 旧版本可能把发布描述写入 script；它不是视频原声，必须重新转录。
+            script_is_description = bool(existing_script) and existing_script in {
+                title.strip(), description.strip()
+            }
+            need_script = script_is_description or existing_script_len < max(200, expected_min_chars)
 
             if enrich_missing_fields and v.platform == "douyin" and v.video_id and need_script:
                 try:
@@ -313,7 +324,11 @@ class AnalyzerService:
                     )
                     fetched_script = detail.get("script", "").strip()
                     fetched_comments = detail.get("top_comments", [])
-                    if fetched_script and len(fetched_script) > existing_script_len:
+                    fetched_video_url = (detail.get("video_url") or "").strip()
+                    if fetched_video_url and fetched_video_url != v.video_url:
+                        v.video_url = fetched_video_url
+                        print(f"[Analyzer] 抖音媒体地址已更新 (video_id={v.video_id})")
+                    if fetched_script and (script_is_description or len(fetched_script) > existing_script_len):
                         v.script = fetched_script
                         print(f"[Analyzer] 抖音文案更新: {existing_script_len} → {len(fetched_script)} 字")
                     if fetched_comments:
@@ -322,6 +337,25 @@ class AnalyzerService:
                     db.refresh(v)
                 except Exception as _e:
                     print(f"[Analyzer] 抖音懒加载失败 (video_id={v.video_id}): {_e}")
+
+            elif enrich_missing_fields and v.platform == "xiaohongshu" and v.video_id and need_script:
+                try:
+                    from services.topic_hunter import topic_hunter
+                    detail = await topic_hunter.fetch_video_detail(
+                        "xiaohongshu", v.video_id, comment_count=20
+                    )
+                    fetched_script = (detail.get("script") or "").strip()
+                    fetched_video_url = (detail.get("video_url") or "").strip()
+                    if fetched_video_url and fetched_video_url != v.video_url:
+                        v.video_url = fetched_video_url
+                    if fetched_script and (script_is_description or len(fetched_script) > existing_script_len):
+                        v.script = fetched_script
+                    if detail.get("top_comments"):
+                        v.top_comments = detail["top_comments"]
+                    db.commit()
+                    db.refresh(v)
+                except Exception as _e:
+                    print(f"[Analyzer] 小红书懒加载失败 (video_id={v.video_id}): {_e}")
 
             elif enrich_missing_fields and v.platform == "weixin" and v.video_id and need_script:
                 try:

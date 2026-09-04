@@ -141,7 +141,13 @@ async def search_topics(
 
                 raw = await tikhub.douyin_fetch_video_statistics(ids)
                 stats_list = raw.get("data", {}).get("statistics_list", [])
-                stats_map = {s["aweme_id"]: s for s in stats_list if isinstance(s, dict)}
+                stats_map = {}
+                for idx, stats_item in enumerate(stats_list):
+                    if not isinstance(stats_item, dict):
+                        continue
+                    mapped_id = stats_item.get("aweme_id") or (ids[idx] if idx < len(ids) else None)
+                    if mapped_id:
+                        stats_map[str(mapped_id)] = stats_item
                 for v in batch:
                     stats = stats_map.get(v["video_id"])
                     if stats:

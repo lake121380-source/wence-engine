@@ -124,13 +124,28 @@ function resetFilters() {
   load()
 }
 
-function copy(g) {
+async function copy(g) {
   const text = g.output_full || g.output_body || ''
-  navigator.clipboard.writeText(text).then(() => {
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const copied = document.execCommand('copy')
+      document.body.removeChild(textarea)
+      if (!copied) throw new Error('copy-failed')
+    }
     message.success('已复制')
-  }).catch(() => {
+  } catch {
     message.error('复制失败，请检查浏览器权限')
-  })
+  }
 }
 
 async function scheduleFromGeneration(g) {

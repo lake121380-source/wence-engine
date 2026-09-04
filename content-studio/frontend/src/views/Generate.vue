@@ -1458,6 +1458,13 @@ function startQuickTopicsPolling() {
   // 不再自动轮询，用户手动点「刷新」按钮更新选题，避免频繁消耗 API
 }
 
+function normalizeIdList(value) {
+  const raw = Array.isArray(value) ? value : (value ? [value] : [])
+  return raw
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id) && id > 0)
+}
+
 async function loadOptions() {
   try {
     const [s, d, vp] = await Promise.all([
@@ -1483,11 +1490,23 @@ async function loadOptions() {
 
   if (generateStore.prefillTopic) {
     const prefill = generateStore.prefillTopic
-    promptText.value = prefill.title || ''
+    promptText.value = prefill.title || prefill.prompt || ''
     if (prefill.platform && ['douyin', 'xiaohongshu', 'weixin'].includes(prefill.platform)) {
       config.platform = prefill.platform
     }
+    const docIds = normalizeIdList(prefill.product_doc_ids || prefill.product_doc_id)
+    const analysisIds = normalizeIdList(prefill.viral_analysis_ids || prefill.viral_analysis_id)
+    const viewpointIds = normalizeIdList(prefill.viewpoint_ids || prefill.viewpoint_id)
+    if (docIds.length) config.product_doc_ids = docIds
+    if (analysisIds.length) config.viral_analysis_ids = analysisIds
+    if (viewpointIds.length) config.viewpoint_ids = viewpointIds
+    syncBlocksFromConfig()
     generateStore.clearPrefillTopic()
+    if (prefill.autoGenerate) {
+      nextTick(() => sendPrompt())
+    } else if (prefill.focusComposer !== false) {
+      nextTick(() => composerRef.value?.focus())
+    }
   }
 
   syncBlocksFromConfig()

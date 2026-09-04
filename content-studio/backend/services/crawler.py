@@ -8,6 +8,18 @@ from models import Creator, CreatorVideo, TenantCreator
 from services.tikhub import tikhub
 from services.knowledge import knowledge_service
 import asyncio
+import sys
+
+
+def _safe_print(message: str) -> None:
+    """在 Windows GBK 控制台安全输出可能含 emoji 的第三方资料。"""
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        safe_text = text.encode(encoding, errors="backslashreplace").decode(encoding, errors="replace")
+        print(safe_text)
 
 
 def _json_safe(obj):
@@ -19,6 +31,16 @@ def _json_safe(obj):
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     return obj
+
+
+class CrawlerFetchError(RuntimeError):
+    """第三方平台抓取失败，供 API 层返回可识别的上游错误。"""
+
+    def __init__(self, platform: str, platform_id: str, cause: Exception):
+        self.platform = platform
+        self.platform_id = platform_id
+        self.cause = cause
+        super().__init__(f"{platform} 视频抓取失败，请稍后重试：{cause}")
 
 
 class CrawlerService:
@@ -337,7 +359,7 @@ class CrawlerService:
                 raw = await tikhub.douyin_get_user_by_unique_id(identifier)
                 print(f"[Crawler] douyin raw status_code={raw.get('status_code')} message={raw.get('message')}")
                 profile = tikhub.parse_douyin_user(raw)
-                print(f"[Crawler] parsed profile: {profile}")
+                _safe_print(f"[Crawler] parsed profile: {profile}")
                 if not profile.get("platform_id"):
                     print(f"[Crawler] WARNING: empty platform_id, raw data keys: {list(raw.get('data', {}).keys())}")
                     return None
@@ -409,6 +431,7 @@ class CrawlerService:
             import traceback
             print(f"[Crawler] fetch_videos error ({platform}/{platform_id}): {e}")
             traceback.print_exc()
+            raise CrawlerFetchError(platform, platform_id, e) from e
 
         return videos[:max_videos]
 

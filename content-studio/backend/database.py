@@ -38,7 +38,7 @@ def _table_exists(conn, table_name: str) -> bool:
     """检查 SQLite 表是否存在，避免 _ensure_* 迁移在表未创建时崩溃。"""
     rows = conn.exec_driver_sql(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        [table_name]
+        (table_name,)
     ).fetchall()
     return len(rows) > 0
 

@@ -13,7 +13,7 @@ from services.analysis_jobs import (
     get_task,
     start_discover_task,
 )
-from services.crawler import crawler_service
+from services.crawler import CrawlerFetchError, crawler_service
 from services.generator import generator_service
 from services.topic_hunter import topic_hunter
 
@@ -180,6 +180,8 @@ async def crawl_creator(
             "total_videos": total,
             "message": f"新增 {new_count} 条视频内容",
         }
+    except CrawlerFetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

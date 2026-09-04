@@ -6,7 +6,7 @@ import { defineStore } from 'pinia'
  */
 export const useGenerateStore = defineStore('generate', {
   state: () => ({
-    prefillTopic: null, // { title, description, keyword, platform }
+    prefillTopic: null, // { title, description, keyword, platform, product_doc_ids, viral_analysis_ids, autoGenerate }
   }),
   actions: {
     setPrefillTopic(topic) {

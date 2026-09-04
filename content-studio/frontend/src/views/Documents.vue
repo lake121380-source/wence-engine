@@ -6,6 +6,10 @@
         <div class="page-subtitle">上传产品文档，自动解析入向量库；支持分文件夹管理</div>
       </div>
       <n-space>
+        <n-button secondary @click="goGenerate">
+          <template #icon><n-icon><SparklesOutline /></n-icon></template>
+          去生成文案
+        </n-button>
         <n-button secondary @click="showCreateFolderModal = true">
           <template #icon><n-icon><FolderOpenOutline /></n-icon></template>
           新建文件夹
@@ -101,6 +105,10 @@
                 <div v-if="row.ai_summary" class="doc-ai-summary">{{ firstSummaryLine(row.ai_summary) }}</div>
               </div>
               <div class="doc-actions">
+                <n-button size="small" type="primary" ghost @click.stop="goGenerateWithDoc(row)">
+                  <template #icon><n-icon><SparklesOutline /></n-icon></template>
+                  生成
+                </n-button>
                 <n-button size="small" secondary @click.stop="openDetail(row)">
                   <template #icon><n-icon><EyeOutline /></n-icon></template>
                   详情
@@ -312,6 +320,10 @@
 
       <template #footer>
         <n-space justify="end">
+          <n-button v-if="detailDoc" type="primary" @click="goGenerateWithDoc(detailDoc)">
+            <template #icon><n-icon><SparklesOutline /></n-icon></template>
+            用于生成文案
+          </n-button>
           <n-button @click="showDetailModal = false">关闭</n-button>
         </n-space>
       </template>
@@ -321,16 +333,20 @@
 
 <script setup>
 import { ref, computed, onActivated, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import {
   CloudUploadOutline, DocumentOutline, DocumentTextOutline,
   CheckmarkCircleOutline, TrashOutline, FolderOutline,
   FolderOpenOutline, MoveOutline, EyeOutline,
-  CreateOutline, VideocamOutline,
+  CreateOutline, VideocamOutline, SparklesOutline,
 } from '@vicons/ionicons5'
 import { documentsApi } from '../api'
+import { useGenerateStore } from '../stores/generate.js'
 
 const message = useMessage()
+const router = useRouter()
+const generateStore = useGenerateStore()
 const allDocuments = ref([])
 const folders = ref([])
 const loading = ref(false)
@@ -372,6 +388,30 @@ const documents = computed(() => {
   if (activeFolder.value === '__none__') return allDocuments.value.filter(d => !d.folder_name)
   return allDocuments.value.filter(d => d.folder_name === activeFolder.value)
 })
+
+function goGenerate() {
+  const visibleDocs = documents.value || []
+  const docIds = visibleDocs.length === 1 ? [visibleDocs[0].id] : []
+  generateStore.setPrefillTopic({
+    title: '结合产品资料，生成一版可直接拍摄的短视频文案',
+    platform: 'douyin',
+    product_doc_ids: docIds,
+    focusComposer: true,
+  })
+  router.push('/generate')
+}
+
+function goGenerateWithDoc(doc) {
+  if (!doc?.id) return
+  generateStore.setPrefillTopic({
+    title: `结合产品资料「${doc.name || '未命名资料'}」，生成一版可直接拍摄的短视频文案`,
+    platform: 'douyin',
+    product_doc_ids: [doc.id],
+    focusComposer: true,
+  })
+  showDetailModal.value = false
+  router.push('/generate')
+}
 
 function folderCount(f) {
   if (f === null) return allDocuments.value.filter(d => !d.folder_name).length

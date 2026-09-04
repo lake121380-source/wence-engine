@@ -45,10 +45,20 @@ class TikHubClient:
         )
 
     async def douyin_get_user_videos(self, sec_user_id: str, max_cursor: int = 0) -> dict:
-        """获取用户主页作品列表"""
+        """获取用户主页作品列表（抖音 App V3 接口）。
+
+        TikHub 的 Web 版本对部分账号会返回 400，官方文档也建议优先使用
+        App 接口；App V3 返回结构仍兼容 ``data.aweme_list``。
+        """
         return await self._get(
-            "/api/v1/douyin/web/fetch_user_post_videos",
-            {"sec_user_id": sec_user_id, "max_cursor": max_cursor, "count": 20}
+            "/api/v1/douyin/app/v3/fetch_user_post_videos",
+            {
+                "sec_user_id": sec_user_id,
+                "max_cursor": max_cursor,
+                "count": 20,
+                "sort_type": 0,
+                "channel": "normal",
+            }
         )
 
     async def douyin_get_video_detail(self, aweme_id: str) -> dict:
@@ -74,12 +84,12 @@ class TikHubClient:
         )
 
     async def xhs_get_user_notes(self, user_id: str, cursor: str = "") -> dict:
-        """获取小红书用户笔记列表（app 接口）"""
-        params = {"user_id": user_id, "num": 30}
+        """获取小红书用户发布笔记列表（App V2 接口）。"""
+        params = {"user_id": user_id}
         if cursor:
             params["cursor"] = cursor
         return await self._get(
-            "/api/v1/xiaohongshu/app/get_user_notes",
+            "/api/v1/xiaohongshu/app_v2/get_user_posted_notes",
             params
         )
 

@@ -129,7 +129,7 @@ const router = useRouter()
 const route = useRoute()
 const message = useMessage()
 const authStore = useAuthStore()
-const wechatLoginEnabled = false
+const wechatLoginEnabled = true
 
 const loginTab = ref('email')
 const isRegister = ref(false)
