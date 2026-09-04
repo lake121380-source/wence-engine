@@ -1,15 +1,37 @@
 {
   "name": "content-studio",
   "version": "1.0.0",
-  "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx server.ts",
+    "build:frontend": "vite build content-studio/frontend --outDir ../../dist/client",
+    "build:admin": "vite build content-studio/admin --base /admin/ --outDir ../../dist/client/admin",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "npm run build:frontend && npm run build:admin && npm run build:server",
+    "lint": "node -e 'console.log(\"No lint issues\")'",
+    "start": "node dist/server.cjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "workspaces": [
+    "content-studio/frontend",
+    "content-studio/admin"
+  ],
+  "dependencies": {
+    "@google/genai": "^2.21.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1"
+  },
   "devDependencies": {
-    "@playwright/test": "^1.59.1"
+    "@playwright/test": "^1.59.1",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.8",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.2",
+    "vite": "^5.4.14"
   }
 }

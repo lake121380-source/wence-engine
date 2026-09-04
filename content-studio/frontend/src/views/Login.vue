@@ -3,7 +3,7 @@
     <!-- 左侧品牌展示区 -->
     <div class="brand-panel">
       <div class="brand-content">
-        <div class="brand-logo">
+        <div class="brand-logo" @click="router.push('/')" style="cursor: pointer;" title="返回官网首页">
           <div class="brand-logo-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
           </div>
@@ -31,6 +31,12 @@
     <!-- 右侧登录区 -->
     <div class="login-panel">
       <div class="login-card">
+        <div class="back-home-bar">
+          <button class="back-home-btn" @click="router.push('/')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            <span>返回官网首页</span>
+          </button>
+        </div>
         <div class="login-header">
           <div class="login-title">{{ isRegister ? '创建账号' : '欢迎回来' }}</div>
           <div class="login-sub">{{ isRegister ? '注册后即可免费体验' : '登录你的账号继续创作' }}</div>
@@ -252,12 +258,12 @@ function _handleLoginSuccess(data) {
   authStore.setToken(data.token)
   authStore.setUser(data.user)
   authStore.setTenant(data.tenant || null)
-  router.replace('/')
+  router.replace('/generate')
 }
 
 onMounted(async () => {
   if (authStore.isAuthenticated) {
-    router.replace('/')
+    router.replace('/generate')
     return
   }
 
@@ -350,6 +356,28 @@ onMounted(async () => {
   border: 1px solid #fde68a; border-radius: 10px; padding: 12px 16px;
   font-size: 13px; color: #92400e; text-align: center;
   display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+
+/* ── 返回官网 ── */
+.back-home-bar {
+  margin-bottom: 20px;
+}
+.back-home-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--c-text-3, #64748b);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+.back-home-btn:hover {
+  background: #f1f5f9;
+  color: var(--c-primary, #2563EB);
 }
 
 /* 响应式 */

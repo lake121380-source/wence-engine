@@ -1,0 +1,8 @@
+{
+  "name": "文策引擎",
+  "description": "基于博主风格与产品知识库的短视频内容分析与文案创作引擎，包含创作者灵感、选题库、知识库及智能生成工作台。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

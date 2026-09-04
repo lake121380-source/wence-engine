@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import Home from '../views/Home.vue'
 import Creators from '../views/Creators.vue'
 import Documents from '../views/Documents.vue'
 import StyleTemplates from '../views/StyleTemplates.vue'
@@ -14,15 +15,16 @@ import Settings from '../views/Settings.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/', component: Home, meta: { public: true } },
     { path: '/login', component: Login, meta: { public: true } },
     { path: '/auth/callback', component: Login, meta: { public: true } },
     { path: '/invite', component: Invite, meta: { public: true } },
-    { path: '/', component: Generate },
+    { path: '/generate', component: Generate },
+    { path: '/workspace', redirect: '/generate' },
     { path: '/creators', component: Creators },
     { path: '/documents', component: Documents },
     { path: '/styles', component: StyleTemplates },
     { path: '/topics', component: Topics },
-    { path: '/generate', redirect: '/' },
     { path: '/history', component: History },
     { path: '/viewpoints', component: Viewpoints },
     { path: '/pricing', component: Pricing },

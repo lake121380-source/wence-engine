@@ -5,12 +5,7 @@ export default defineConfig({
   base: '/admin/',
   plugins: [vue()],
   server: {
-    port: 5174,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      }
-    }
+    port: 3000,
+    host: '0.0.0.0',
   }
 })
