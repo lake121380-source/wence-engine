@@ -98,48 +98,48 @@ onMounted(load)
   background: var(--c-bg-elevated, #fff);
   border: 1px solid var(--c-border, rgba(0,0,0,.06));
   border-radius: var(--radius-lg, 12px);
-  padding: 16px;
+  padding: 16px 20px;
   cursor: pointer;
-  transition: border-color .2s, box-shadow .2s;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  transition: border-color var(--duration-fast, .2s), box-shadow var(--duration-fast, .2s);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.04));
 }
 .conv-card:hover {
-  border-color: rgba(99,102,241,.3);
-  box-shadow: 0 4px 16px rgba(99,102,241,.08);
+  border-color: var(--c-primary-light, rgba(37,99,235,.25));
+  box-shadow: 0 4px 16px rgba(37,99,235,.08);
 }
 .conv-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 12px;
 }
 .conv-date {
-  font-size: 11px;
-  color: #94a3b8;
+  font-size: 12px;
+  color: var(--c-text-4, #94a3b8);
 }
 .conv-bubble {
   margin-bottom: 10px;
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md, 10px);
   font-size: 13px;
   line-height: 1.7;
 }
 .user-bubble {
-  background: rgba(99,102,241,.06);
-  border: 1px solid rgba(99,102,241,.1);
+  background: var(--c-primary-bg, rgba(37,99,235,.06));
+  border: 1px solid rgba(37,99,235,.12);
 }
 .ai-bubble {
   background: var(--c-bg-soft, #f8fafc);
-  border: 1px solid rgba(0,0,0,.04);
+  border: 1px solid var(--c-border, rgba(0,0,0,.05));
 }
 .bubble-role {
   font-size: 11px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--c-text-3, #64748b);
   margin-bottom: 4px;
 }
 .bubble-text {
-  color: var(--c-text-2, #374151);
+  color: var(--c-text-1, #0f172a);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -152,8 +152,9 @@ onMounted(load)
 .expand-hint {
   text-align: center;
   font-size: 12px;
-  color: #6366f1;
-  padding-top: 4px;
+  font-weight: 500;
+  color: var(--c-primary, #2563eb);
+  padding-top: 6px;
 }
 .empty-state-big {
   display: flex;

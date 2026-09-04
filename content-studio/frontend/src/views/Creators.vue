@@ -1120,10 +1120,12 @@ async function confirmAddToDocs() {
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.04));
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 .creator-card:hover {
-  border-color: var(--c-primary-light, rgba(37,99,235,.25));
-  box-shadow: 0 4px 20px rgba(37,99,235,.1), 0 1px 4px rgba(0,0,0,.04);
+  border-color: var(--c-primary-light, rgba(37,99,235,.3));
+  box-shadow: 0 6px 20px rgba(37,99,235,.08), 0 1px 4px rgba(0,0,0,.04);
   transform: translateY(-2px);
 }
 .card-deco {
@@ -1138,16 +1140,16 @@ async function confirmAddToDocs() {
 .creator-info { flex: 1; min-width: 0; }
 .creator-name { font-size: 15px; font-weight: 600; color: var(--c-text-1, #0f172a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .creator-uid { font-size: 12px; color: var(--c-text-4, #94a3b8); }
-.creator-stats { display: flex; gap: 0; margin-bottom: 16px; background: var(--c-bg-soft, #f8fafc); border-radius: 8px; }
-.cstat { flex: 1; text-align: center; padding: 10px 0; border-right: 1px solid #e8eef4; }
+.creator-stats { display: flex; gap: 0; margin-bottom: 16px; background: var(--c-bg-soft, #f8fafc); border-radius: 8px; border: 1px solid var(--c-border, rgba(0,0,0,.04)); }
+.cstat { flex: 1; text-align: center; padding: 10px 0; border-right: 1px solid var(--c-border, #e8eef4); }
 .cstat:last-child { border-right: none; }
 .cstat-val { font-size: 15px; font-weight: 700; color: var(--c-text-1, #0f172a); font-variant-numeric: tabular-nums; }
 .cstat-label { font-size: 11px; color: var(--c-text-4, #94a3b8); margin-top: 2px; }
-.creator-actions { display: flex; flex-direction: column; gap: 8px; }
+.creator-actions { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
 .ca-row { display: flex; gap: 8px; align-items: center; }
 .ca-btn-primary { flex: 1; justify-content: center; }
 .ca-btn-secondary { flex: 1; justify-content: center; }
-.ca-row-secondary { border-top: 1px solid var(--c-border, #e8eef4); padding-top: 8px; color: var(--c-text-3, #64748b); }
+.ca-row-secondary { border-top: 1px solid var(--c-border, #e8eef4); padding-top: 8px; color: var(--c-text-3, #64748b); display: flex; align-items: center; }
 .last-crawled { font-size: 11px; color: #cbd5e1; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
 .style-badge { color: var(--c-success, #22c55e); font-weight: 500; }
 

@@ -15,8 +15,8 @@
 
     <!-- 搜索区 -->
     <div class="search-card">
-      <n-form inline :label-width="0" style="gap:12px;flex-wrap:wrap;">
-        <n-form-item style="flex:1;min-width:200px;">
+      <n-form inline :label-width="0" class="search-form-layout">
+        <n-form-item class="search-input-item">
           <n-input
             v-model:value="keyword"
             placeholder="输入行业关键词，如：美妆、减脂、护肤"
@@ -28,7 +28,7 @@
           </n-input>
         </n-form-item>
 
-        <n-form-item label="平台" label-style="color:rgba(255,255,255,.6)">
+        <n-form-item label="平台" class="search-filter-item">
           <n-checkbox-group v-model:value="platforms" style="display:flex;gap:8px;">
             <n-checkbox value="douyin">抖音</n-checkbox>
             <n-checkbox value="xiaohongshu">小红书</n-checkbox>
@@ -36,23 +36,23 @@
           </n-checkbox-group>
         </n-form-item>
 
-        <n-form-item label="排序" label-style="color:rgba(255,255,255,.6)">
+        <n-form-item label="排序" class="search-filter-item">
           <n-select v-model:value="sort" :options="sortOptions" style="width:120px;" />
         </n-form-item>
 
-        <n-form-item label="视频类型" label-style="color:rgba(255,255,255,.6)">
+        <n-form-item label="视频类型" class="search-filter-item">
           <n-select v-model:value="videoType" :options="videoTypeOptions" style="width:160px;" />
         </n-form-item>
 
-        <n-form-item label="发布时间" label-style="color:rgba(255,255,255,.6)">
+        <n-form-item label="发布时间" class="search-filter-item">
           <n-select v-model:value="publishTime" :options="publishTimeOptions" style="width:120px;" />
         </n-form-item>
 
-        <n-form-item label="数量" label-style="color:rgba(255,255,255,.6)">
+        <n-form-item label="数量" class="search-filter-item">
           <n-select v-model:value="limit" :options="limitOptions" style="width:90px;" />
         </n-form-item>
 
-        <n-form-item>
+        <n-form-item class="search-submit-item">
           <n-button type="primary" size="large" :loading="searching" @click="search">
             <template #icon><n-icon><SearchOutline /></n-icon></template>
             搜索爆款
@@ -1022,9 +1022,40 @@ onMounted(() => {
   background: var(--c-bg-elevated, #fff);
   border: 1px solid var(--c-border, rgba(0,0,0,.06));
   border-radius: var(--radius-lg, 12px);
-  padding: 16px var(--space-xl, 24px);
-  margin-bottom: 16px;
+  padding: 18px 24px;
+  margin-bottom: 20px;
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.04));
+}
+
+.search-form-layout {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.search-input-item {
+  flex: 1 1 260px;
+  min-width: 220px;
+  margin-bottom: 0 !important;
+}
+
+.search-filter-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0 !important;
+}
+
+.search-filter-item :deep(.n-form-item-label) {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text-2, #475569) !important;
+  margin-right: 6px;
+}
+
+.search-submit-item {
+  margin-left: auto;
+  margin-bottom: 0 !important;
 }
 
 .action-bar {

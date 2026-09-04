@@ -1067,35 +1067,36 @@ onMounted(async () => {
 
 <style scoped>
 .generate-page {
-  min-height: calc(100vh - 140px);
+  min-height: calc(100vh - 120px);
 }
 
 .gen-shell {
   padding: 0;
-  height: calc(100vh - 220px);
-  max-height: calc(100vh - 220px);
+  height: calc(100vh - 200px);
+  min-height: 520px;
   overflow: hidden;
   display: grid;
   grid-template-rows: 1fr auto;
 }
 
 .chat-list {
-  padding: 14px;
+  padding: 16px 20px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
 }
 
 .chat-msg {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
   animation: msgIn var(--duration-normal, 200ms) var(--ease-default, ease);
 }
 
 .chat-msg.is-user {
-  grid-template-columns: minmax(0, 1fr) 40px;
+  grid-template-columns: minmax(0, 1fr) 38px;
 }
 
 .chat-msg.is-user .chat-avatar {
@@ -1111,23 +1112,24 @@ onMounted(async () => {
 }
 
 .chat-avatar {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
   background: #0f766e;
   color: #fff;
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .chat-bubble {
-  max-width: min(960px, 100%);
+  max-width: min(920px, 92%);
   border-radius: var(--radius-lg, 12px);
   border: 1px solid var(--c-border, rgba(0, 0, 0, 0.08));
   background: var(--c-bg-elevated, #fff);
-  padding: 10px 12px;
+  padding: 14px 16px;
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
 }
 
@@ -1373,26 +1375,28 @@ onMounted(async () => {
 .composer-main {
   position: relative;
   display: flex;
-  gap: 10px;
+  gap: 12px;
+  align-items: flex-end;
 }
 
 .composer-input {
   width: 100%;
   min-height: 72px;
-  max-height: 180px;
+  max-height: 160px;
   border: 1px solid var(--c-border, rgba(0, 0, 0, 0.08));
-  background: #fff;
+  background: var(--c-bg-soft, #f8fafc);
   border-radius: var(--radius-lg, 12px);
-  padding: 10px 12px;
+  padding: 10px 14px;
   font-size: 14px;
-  color: var(--c-text-2, #374151);
-  line-height: 1.7;
+  color: var(--c-text-1, #0f172a);
+  line-height: 1.6;
   resize: vertical;
   outline: none;
-  transition: border-color var(--duration-fast, 150ms), box-shadow var(--duration-fast, 150ms);
+  transition: border-color var(--duration-fast, 150ms), box-shadow var(--duration-fast, 150ms), background-color var(--duration-fast, 150ms);
 }
 
 .composer-input:focus {
+  background: #ffffff;
   border-color: var(--c-primary, #2563EB);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
@@ -1400,6 +1404,8 @@ onMounted(async () => {
 .send-btn {
   align-self: flex-end;
   height: 42px;
+  padding: 0 18px;
+  flex-shrink: 0;
 }
 
 .mention-panel {

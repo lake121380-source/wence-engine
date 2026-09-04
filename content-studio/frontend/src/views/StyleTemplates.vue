@@ -38,7 +38,7 @@
 
     <n-spin :show="loading">
       <div v-if="templates.length === 0 && !loading" class="empty-state-big">
-        <n-icon size="48" color="rgba(255,255,255,0.15)"><ColorPaletteOutline /></n-icon>
+        <n-icon size="48" color="rgba(0,0,0,0.12)"><ColorPaletteOutline /></n-icon>
         <p>还没有风格模版</p>
         <p style="font-size:12px;">去博主页面抓取内容后点击「提取风格」</p>
       </div>

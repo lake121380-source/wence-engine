@@ -1,7 +1,14 @@
 <template>
   <div>
-    <div class="page-description">
-      <p class="page-subtitle">沉淀你的独立立场与行业观点，在生成文案时自动融入个人视角</p>
+    <div class="page-header">
+      <div>
+        <div class="page-title">观点库</div>
+        <div class="page-subtitle">沉淀你的独立立场与行业观点，在生成文案时自动融入个人视角</div>
+      </div>
+      <n-button type="primary" @click="openCreate">
+        <template #icon><n-icon><AddOutline /></n-icon></template>
+        添加观点
+      </n-button>
     </div>
 
     <!-- 工具栏 -->
@@ -20,10 +27,6 @@
           <template #unchecked>全部</template>
         </n-switch>
       </div>
-      <n-button type="primary" @click="openCreate">
-        <template #icon><n-icon><AddOutline /></n-icon></template>
-        添加观点
-      </n-button>
     </div>
 
     <!-- 观点列表 -->
@@ -231,6 +234,10 @@ onMounted(loadViewpoints)
 </script>
 
 <style scoped>
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+.page-title { font-size: 22px; font-weight: 600; color: var(--c-text-1, #0f172a); }
+.page-subtitle { font-size: 13px; color: var(--c-text-4, #94a3b8); margin-top: 4px; }
+
 .toolbar {
   display: flex;
   justify-content: space-between;

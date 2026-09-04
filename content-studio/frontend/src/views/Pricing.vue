@@ -421,4 +421,10 @@ onUnmounted(() => {
 .qr-hint { font-size: 13px; color: #64748b; }
 
 .dev-pay-area { margin-top: 4px; }
+
+@media (max-width: 768px) {
+  .plans-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
