@@ -71,7 +71,7 @@
       v-model:show="showPayModal"
       preset="card"
       title="选择支付方式"
-      style="width:440px;border-radius:20px;"
+      style="width:440px;max-width:calc(100vw - 32px);border-radius:20px;"
       :mask-closable="!creating"
     >
       <div class="pay-modal">
@@ -88,7 +88,9 @@
               :class="{ selected: payMethod === 'wechat' }"
               @click="payMethod = 'wechat'"
             >
-              <img src="https://img.icons8.com/color/48/wechat.png" alt="微信" width="28" />
+              <n-icon size="28" class="pay-method-icon wechat-icon" aria-hidden="true">
+                <LogoWechat />
+              </n-icon>
               <span>微信支付</span>
             </div>
             <div
@@ -96,11 +98,13 @@
               :class="{ selected: payMethod === 'alipay' }"
               @click="payMethod = 'alipay'"
             >
-              <img src="https://img.icons8.com/color/48/alipay.png" alt="支付宝" width="28" />
+              <n-icon size="28" class="pay-method-icon alipay-icon" aria-hidden="true">
+                <LogoAlipay />
+              </n-icon>
               <span>支付宝</span>
             </div>
           </div>
-          <div style="display:flex;gap:12px;margin-top:20px;">
+          <div class="pay-actions" style="margin-top:20px;">
             <n-button secondary block @click="showPayModal = false">取消</n-button>
             <n-button type="primary" block :loading="creating" @click="createOrder">
               确认支付
@@ -126,7 +130,7 @@
               @click="handleDevPay"
             >模拟支付完成（跳过真实扫码）</n-button>
           </div>
-          <div style="display:flex;gap:12px;margin-top:16px;">
+          <div class="pay-actions" style="margin-top:16px;">
             <n-button secondary block @click="resetPay(); payStep = 1">返回</n-button>
             <n-button secondary block @click="showPayModal = false; resetPay()">关闭</n-button>
           </div>
@@ -139,7 +143,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
-import { CheckmarkOutline } from '@vicons/ionicons5'
+import { CheckmarkOutline, LogoWechat, LogoAlipay } from '@vicons/ionicons5'
 import { useAuthStore } from '../stores/auth.js'
 import { paymentApi } from '../api'
 
@@ -409,6 +413,24 @@ onUnmounted(() => {
 
 .pay-method-btn:hover { border-color: var(--c-primary, #6366f1); }
 .pay-method-btn.selected { border-color: var(--c-primary, #6366f1); background: #f0f4ff; color: var(--c-primary, #6366f1); }
+
+.pay-method-icon {
+  flex: 0 0 auto;
+}
+
+.wechat-icon { color: #07c160; }
+.alipay-icon { color: #1677ff; }
+
+.pay-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pay-actions .n-button {
+  min-width: 0;
+  width: 100%;
+}
 
 .qr-area {
   display: flex;
