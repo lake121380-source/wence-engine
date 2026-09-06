@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/anthropic"
     deepseek_model: str = "deepseek-chat"
 
+    # TikHub 上游请求：偶发 TLS EOF 时有限重试，均可通过 .env 调整
+    tikhub_connect_timeout_seconds: float = 15.0
+    tikhub_read_timeout_seconds: float = 60.0
+    tikhub_write_timeout_seconds: float = 30.0
+    tikhub_pool_timeout_seconds: float = 15.0
+    tikhub_max_retries: int = 2
+    tikhub_retry_backoff_seconds: float = 0.8
+
     # DB
     database_url: str = "sqlite:///./content_studio.db"
 
@@ -47,6 +55,25 @@ class Settings(BaseSettings):
     jwt_expire_hours: int = 24 * 7         # 7天
     allow_insecure_jwt_secret: bool = False
 
+    # Admin init protection（首次初始化管理员所需密钥，留空则禁用 /admin/init 接口）
+    admin_init_token: str = ""
+
+    # Email verification
+    email_verify_enabled: bool = True
+    email_verify_expire_hours: int = 24
+    backend_public_url: str = "http://localhost:8080"
+    email_otp_debug_echo: bool = False
+
+    # SMTP
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    email_from: str = ""
+    email_from_name: str = "文策引擎"
+
     # Subscription pricing
     monthly_price_fen: int = 4900          # ¥49.00 in fen
     trial_days: int = 1
@@ -54,8 +81,14 @@ class Settings(BaseSettings):
     # App
     app_name: str = "文策引擎"
     debug: bool = False
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost:5174"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost:5174", "https://wenceai.xyz"]
     frontend_url: str = "http://localhost:5173"
+
+    # Public OpenAPI for content generation
+    open_api_enabled: bool = False
+    open_api_key: str = ""
+    open_api_user_id: int = 0
+    open_api_require_subscription: bool = True
 
     class Config:
         env_file = ".env"

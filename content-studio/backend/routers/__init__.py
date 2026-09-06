@@ -11,13 +11,16 @@ from routers.documents import router as documents_router
 from routers.generations import router as generations_router
 from routers.media_proxy import router as media_proxy_router
 from routers.payment import router as payment_router
+from routers.schedule import router as schedule_router
 from routers.style_templates import router as style_templates_router
 from routers.topics import router as topics_router
 from routers.viewpoints import router as viewpoints_router
+from routers.generation_analytics import router as analytics_router
 
 router = APIRouter()
 router.include_router(auth_router)
 router.include_router(payment_router)
+router.include_router(schedule_router)
 router.include_router(creators_router)
 router.include_router(documents_router)
 router.include_router(topics_router)
@@ -26,6 +29,7 @@ router.include_router(generations_router)
 router.include_router(analyses_router)
 router.include_router(viewpoints_router)
 router.include_router(media_proxy_router)
+router.include_router(analytics_router)
 
 try:
     from routers.tenant import router as tenant_router

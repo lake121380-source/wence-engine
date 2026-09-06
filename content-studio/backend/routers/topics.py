@@ -30,6 +30,40 @@ def _rate_level(value, key: str) -> str:
     return "low"
 
 
+def _build_viral_reason(
+    title: str,
+    like_play_ratio: Optional[float],
+    comment_play_ratio: Optional[float],
+    collect_play_ratio: Optional[float],
+) -> str:
+    cues = []
+    like_lv = _rate_level(like_play_ratio, "like_play")
+    comment_lv = _rate_level(comment_play_ratio, "comment_play")
+    collect_lv = _rate_level(collect_play_ratio, "collect_play")
+
+    if like_lv == "high":
+        cues.append("开头钩子强，观点共鸣明显")
+    elif like_lv == "medium":
+        cues.append("开头有抓手，能建立基础共鸣")
+
+    if comment_lv == "high":
+        cues.append("观点具争议或代入感，讨论意愿高")
+    elif comment_lv == "medium":
+        cues.append("话题具备讨论空间")
+
+    if collect_lv == "high":
+        cues.append("信息密度高，具备明确收藏价值")
+    elif collect_lv == "medium":
+        cues.append("含可复用方法，具备一定留存价值")
+
+    if not cues:
+        cues.append("选题方向可用，建议强化前三秒冲突与结尾行动点")
+
+    short_title = (title or "").strip()
+    prefix = f"《{short_title[:18]}》" if short_title else "该选题"
+    return f"{prefix}{'，'.join(cues[:2])}。"
+
+
 class TopicSearchRequest(BaseModel):
     keyword: str
     platforms: list[str] = ["douyin"]
@@ -91,6 +125,7 @@ async def search_topics(
             min_likes=req.min_likes,
             days=req.days,
             pages=req.pages,
+            video_type=req.video_type,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -98,7 +133,7 @@ async def search_topics(
     douyin_vids = [v for v in videos if v.get("platform") == "douyin" and v.get("video_id")]
     if douyin_vids:
         try:
-            batch_size = 20
+            batch_size = 10  # fetch_multi_video_statistics 单次最多支持 10 个 ID
             for i in range(0, len(douyin_vids), batch_size):
                 batch = douyin_vids[i : i + batch_size]
                 ids = [v["video_id"] for v in batch]
@@ -106,7 +141,13 @@ async def search_topics(
 
                 raw = await tikhub.douyin_fetch_video_statistics(ids)
                 stats_list = raw.get("data", {}).get("statistics_list", [])
-                stats_map = {s["aweme_id"]: s for s in stats_list if isinstance(s, dict)}
+                stats_map = {}
+                for idx, stats_item in enumerate(stats_list):
+                    if not isinstance(stats_item, dict):
+                        continue
+                    mapped_id = stats_item.get("aweme_id") or (ids[idx] if idx < len(ids) else None)
+                    if mapped_id:
+                        stats_map[str(mapped_id)] = stats_item
                 for v in batch:
                     stats = stats_map.get(v["video_id"])
                     if stats:
@@ -151,8 +192,15 @@ async def search_topics(
                 existing.like_play_ratio = v.get("like_play_ratio", 0)
                 existing.comment_play_ratio = v.get("comment_play_ratio", 0)
                 existing.collect_play_ratio = v.get("collect_play_ratio", 0)
+                existing.viral_reason = _build_viral_reason(
+                    existing.title,
+                    existing.like_play_ratio,
+                    existing.comment_play_ratio,
+                    existing.collect_play_ratio,
+                )
                 saved_ids.append(existing.id)
                 v["id"] = existing.id
+                v["viral_reason"] = existing.viral_reason
                 continue
 
             topic = Topic(
@@ -180,6 +228,12 @@ async def search_topics(
                 like_play_ratio=v.get("like_play_ratio", 0),
                 comment_play_ratio=v.get("comment_play_ratio", 0),
                 collect_play_ratio=v.get("collect_play_ratio", 0),
+                viral_reason=_build_viral_reason(
+                    v.get("title", ""),
+                    v.get("like_play_ratio", 0),
+                    v.get("comment_play_ratio", 0),
+                    v.get("collect_play_ratio", 0),
+                ),
                 tenant_id=current_user.tenant_id,
                 user_id=current_user.id,
             )
@@ -187,6 +241,7 @@ async def search_topics(
             db.flush()
             saved_ids.append(topic.id)
             v["id"] = topic.id
+            v["viral_reason"] = topic.viral_reason
         db.commit()
 
     # 查询已有分析记录
@@ -214,11 +269,112 @@ async def search_topics(
         tid = v.get("id")
         v["has_analysis"] = tid in analyses_map
         v["analysis"] = analyses_map.get(tid)
+        if not v.get("viral_reason"):
+            v["viral_reason"] = _build_viral_reason(
+                v.get("title", ""),
+                v.get("like_play_ratio", 0),
+                v.get("comment_play_ratio", 0),
+                v.get("collect_play_ratio", 0),
+            )
 
     warnings = []
     if search_errors:
         warnings.append(f"部分平台搜索失败: {'; '.join(search_errors)}")
     return {"total": len(videos), "videos": videos, "saved_ids": saved_ids, "warnings": warnings}
+
+
+@router.post("/topics/add-by-url")
+async def add_topic_by_url(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_subscription),
+):
+    """通过视频链接（抖音/小红书）直接保存一条选题到选题库"""
+    url = (payload or {}).get("url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="请传入视频链接")
+
+    try:
+        v = await topic_hunter.fetch_topic_from_url(url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取视频详情失败：{e}")
+
+    video_id = v.get("video_id") or ""
+    platform = v.get("platform") or ""
+    if not video_id:
+        raise HTTPException(status_code=400, detail="未能解析到视频 ID")
+
+    existing = db.query(Topic).filter(
+        Topic.platform == platform,
+        Topic.video_id == video_id,
+        Topic.user_id == current_user.id,
+    ).first()
+    if existing:
+        return {
+            "id": existing.id,
+            "already_saved": True,
+            "viral_reason": existing.viral_reason,
+            "topic": {
+                "id": existing.id,
+                "title": existing.title,
+                "author": existing.author,
+                "cover_url": existing.cover_url,
+                "platform": existing.platform,
+            },
+        }
+
+    topic = Topic(
+        keyword="",
+        platform=platform,
+        video_id=video_id,
+        title=v.get("title", ""),
+        description=v.get("description", ""),
+        author=v.get("author", ""),
+        author_id=v.get("author_id", ""),
+        cover_url=v.get("cover_url", ""),
+        like_count=v.get("like_count", 0) or 0,
+        comment_count=v.get("comment_count", 0) or 0,
+        share_count=v.get("share_count", 0) or 0,
+        play_count=v.get("play_count", 0) or 0,
+        collect_count=v.get("collect_count", 0) or 0,
+        tags=v.get("tags", []) or [],
+        author_unique_id=v.get("author_unique_id", ""),
+        author_avatar=v.get("author_avatar", ""),
+        author_follower_count=v.get("author_follower_count", 0) or 0,
+        author_bio=v.get("author_bio", ""),
+        author_url=v.get("author_url", ""),
+        video_url=v.get("video_url", "") or url,
+        video_create_time=v.get("create_time", 0) or 0,
+        like_play_ratio=v.get("like_play_ratio") or 0,
+        comment_play_ratio=v.get("comment_play_ratio") or 0,
+        collect_play_ratio=v.get("collect_play_ratio") or 0,
+        viral_reason=_build_viral_reason(
+            v.get("title", ""),
+            v.get("like_play_ratio"),
+            v.get("comment_play_ratio"),
+            v.get("collect_play_ratio"),
+        ),
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+    )
+    db.add(topic)
+    db.commit()
+    db.refresh(topic)
+
+    return {
+        "id": topic.id,
+        "already_saved": False,
+        "viral_reason": topic.viral_reason,
+        "topic": {
+            "id": topic.id,
+            "title": topic.title,
+            "author": topic.author,
+            "cover_url": topic.cover_url,
+            "platform": topic.platform,
+        },
+    }
 
 
 @router.post("/topics/save")
@@ -234,7 +390,7 @@ def save_topic(
         Topic.user_id == current_user.id,
     ).first()
     if existing:
-        return {"id": existing.id, "already_saved": True}
+        return {"id": existing.id, "already_saved": True, "viral_reason": existing.viral_reason}
 
     topic = Topic(
         keyword=req.keyword,
@@ -261,13 +417,19 @@ def save_topic(
         like_play_ratio=req.like_play_ratio,
         comment_play_ratio=req.comment_play_ratio,
         collect_play_ratio=req.collect_play_ratio,
+        viral_reason=_build_viral_reason(
+            req.title,
+            req.like_play_ratio,
+            req.comment_play_ratio,
+            req.collect_play_ratio,
+        ),
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
     )
     db.add(topic)
     db.commit()
     db.refresh(topic)
-    return {"id": topic.id, "already_saved": False}
+    return {"id": topic.id, "already_saved": False, "viral_reason": topic.viral_reason}
 
 
 @router.post("/topics/{topic_id}/fetch-detail")
@@ -431,6 +593,7 @@ def list_topics(
             "like_play_ratio": t.like_play_ratio,
             "comment_play_ratio": t.comment_play_ratio,
             "collect_play_ratio": t.collect_play_ratio,
+            "viral_reason": t.viral_reason,
             "tags": t.tags,
             "script": t.script,
             "top_comments": t.top_comments,

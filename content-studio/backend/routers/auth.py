@@ -3,6 +3,7 @@
 """
 import uuid
 import hashlib
+import secrets
 import bcrypt
 import httpx
 import time
@@ -14,11 +15,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User, Tenant, Subscription, WechatScene
+from models import User, Tenant, Subscription, WechatScene, EmailVerificationToken
 from services.auth import (
     create_scene_qrcode, get_wx_userinfo_by_code,
     create_jwt_token, verify_wechat_signature,
 )
+from services.email import send_verification_email, is_email_service_configured
 from config import settings
 from .deps import get_current_user
 
@@ -27,6 +29,74 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _LOGIN_WINDOW_SECONDS = 60
 _LOGIN_MAX_ATTEMPTS = 5
 _login_attempts: dict[str, list[float]] = {}
+
+# ── 注册邮箱 OTP 内存存储 ─────────────────────────────────────────────────────
+# key: email, value: {code: str, expire_at: float, used: bool}
+_EMAIL_OTP_STORE: dict[str, dict] = {}
+_OTP_EXPIRE_SECONDS = 600  # 10 分钟有效
+_OTP_COOLDOWN_SECONDS = 60  # 60 秒内不能重复发送
+
+
+def _generate_otp() -> str:
+    """生成 6 位数字验证码"""
+    import random
+    return str(random.randint(100000, 999999))
+
+
+def _send_otp_email(to_email: str, nickname: str, code: str):
+    """发送 OTP 验证码邮件"""
+    from email.message import EmailMessage
+    from email.utils import formataddr, formatdate, make_msgid
+    import smtplib
+
+    if not is_email_service_configured():
+        raise RuntimeError("邮件服务未配置")
+
+    display_name = nickname or to_email.split("@")[0]
+    subject = "注册验证码 - 文策引擎"
+    text = (
+        f"你好，{display_name}：\n\n"
+        f"你的注册验证码为：{code}\n\n"
+        "验证码 10 分钟内有效，请尽快完成注册。\n"
+        "如果不是你本人操作，请忽略本邮件。\n"
+    )
+    html = (
+        "<html><body style='font-family:Segoe UI,Arial,sans-serif;color:#1f2937;'>"
+        f"<p>你好，{display_name}：</p>"
+        "<p>你的注册验证码为：</p>"
+        f"<p style='font-size:28px;letter-spacing:4px;font-weight:700;color:#0ea5e9;margin:10px 0 14px;'>{code}</p>"
+        "<p>验证码 10 分钟内有效，请尽快完成注册。</p>"
+        "<p style='color:#6b7280;'>如果不是你本人操作，请忽略本邮件。</p>"
+        "</body></html>"
+    )
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = formataddr((settings.email_from_name, settings.email_from))
+    msg["To"] = to_email
+    msg["Date"] = formatdate(localtime=True)
+    from_domain = (settings.email_from.split("@")[-1] if "@" in settings.email_from else "localhost")
+    msg["Message-ID"] = make_msgid(domain=from_domain)
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
+
+    if settings.smtp_use_ssl:
+        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=15) as server:
+            if settings.smtp_user:
+                server.login(settings.smtp_user, settings.smtp_password)
+            refused = server.send_message(msg)
+            if refused:
+                raise RuntimeError(f"收件人被 SMTP 拒收: {refused}")
+        return
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
+        if settings.smtp_use_tls:
+            server.starttls()
+        if settings.smtp_user:
+            server.login(settings.smtp_user, settings.smtp_password)
+        refused = server.send_message(msg)
+        if refused:
+            raise RuntimeError(f"收件人被 SMTP 拒收: {refused}")
 
 
 # ── 密码哈希 ──────────────────────────────────────────────────────────────────
@@ -51,11 +121,21 @@ class EmailRegisterRequest(BaseModel):
     email: str
     password: str
     nickname: str = ""
+    verify_code: str = ""  # 注册验证码（邮件服务已配置时必填）
+
+
+class SendRegisterCodeRequest(BaseModel):
+    email: str
+    nickname: str = ""
 
 
 class EmailLoginRequest(BaseModel):
     email: str
     password: str
+
+
+class EmailResendRequest(BaseModel):
+    email: str
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -88,7 +168,8 @@ class UserOut(BaseModel):
 
 def _create_new_user(db: Session, *, email: str = None, password_hash: str = None,
                      oauth_provider: str = None, oauth_id: str = None,
-                     wechat_openid: str = None, nickname: str = "", avatar: str = "") -> User:
+                     wechat_openid: str = None, nickname: str = "", avatar: str = "",
+                     email_verified: bool = True) -> User:
     """创建新用户 + 租户 + 试用订阅"""
     display_name = nickname or (email.split("@")[0] if email else "新用户")
     tenant = Tenant(name=f"{display_name}的空间")
@@ -98,6 +179,7 @@ def _create_new_user(db: Session, *, email: str = None, password_hash: str = Non
     user = User(
         tenant_id=tenant.id,
         email=email,
+        email_verified=email_verified,
         password_hash=password_hash,
         oauth_provider=oauth_provider,
         oauth_id=oauth_id,
@@ -161,10 +243,49 @@ def _user_to_dict(user: User) -> dict:
         "avatar": user.avatar or "",
         "role": user.role,
         "email": user.email or "",
+        "email_verified": bool(user.email_verified),
         "subscription_expire_at": expire_at,
         "is_trial": user.is_trial,
         "is_subscription_active": user.is_subscription_active,
     }
+
+
+def _hash_verify_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _create_email_verification_token(db: Session, user_id: int) -> str:
+    now = datetime.utcnow()
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user_id,
+        EmailVerificationToken.used_at == None,
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+
+    raw_token = secrets.token_urlsafe(32)
+    token = EmailVerificationToken(
+        user_id=user_id,
+        token_hash=_hash_verify_token(raw_token),
+        expire_at=now + timedelta(hours=max(1, int(settings.email_verify_expire_hours))),
+    )
+    db.add(token)
+    db.commit()
+    return raw_token
+
+
+def _build_email_verify_url(raw_token: str) -> str:
+    base = (settings.backend_public_url or "http://localhost:8080").rstrip("/")
+    return f"{base}/api/auth/email/verify?token={raw_token}"
+
+
+def _send_register_verify_email(db: Session, user: User):
+    if not is_email_service_configured():
+        raise HTTPException(status_code=503, detail="邮件服务未配置，请联系管理员")
+    raw_token = _create_email_verification_token(db, user.id)
+    verify_url = _build_email_verify_url(raw_token)
+    try:
+        send_verification_email(user.email or "", user.nickname or "", verify_url)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"验证邮件发送失败: {exc}")
 
 
 def _get_client_ip(request: Request) -> str:
@@ -213,6 +334,47 @@ def _clear_login_attempts(key: str):
 #  邮箱注册 / 登录
 # ═══════════════════════════════════════════════
 
+@router.post("/email/send-register-code")
+def send_register_code(body: SendRegisterCodeRequest):
+    """发送注册邮箱验证码（OTP）"""
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+
+    if not is_email_service_configured():
+        raise HTTPException(status_code=503, detail="邮件服务未配置，请联系管理员")
+
+    now = time.time()
+    existing_otp = _EMAIL_OTP_STORE.get(email)
+    if existing_otp and not existing_otp.get("used") and now - existing_otp.get("sent_at", 0) < _OTP_COOLDOWN_SECONDS:
+        wait = int(_OTP_COOLDOWN_SECONDS - (now - existing_otp["sent_at"]))
+        raise HTTPException(status_code=429, detail=f"发送过于频繁，请 {wait} 秒后重试")
+
+    code = _generate_otp()
+    _EMAIL_OTP_STORE[email] = {
+        "code": code,
+        "expire_at": now + _OTP_EXPIRE_SECONDS,
+        "sent_at": now,
+        "used": False,
+    }
+
+    try:
+        _send_otp_email(email, body.nickname or email.split("@")[0], code)
+    except Exception as exc:
+        _EMAIL_OTP_STORE.pop(email, None)
+        raise HTTPException(status_code=503, detail=f"验证码发送失败: {exc}")
+
+    payload = {"ok": True, "message": "验证码已发送，请查收邮件（10分钟内有效）"}
+    if settings.debug or settings.email_otp_debug_echo:
+        payload["dev_code"] = code
+    return payload
+
+
+@router.get("/config")
+def auth_config():
+    return {"register_code_required": is_email_service_configured()}
+
+
 @router.post("/register")
 def email_register(body: EmailRegisterRequest, db: Session = Depends(get_db)):
     """邮箱注册"""
@@ -221,8 +383,28 @@ def email_register(body: EmailRegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="邮箱格式不正确")
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="密码至少 8 位")
-    if body.password.isdigit() or body.password.isalpha():
+    if not any(c.isalpha() for c in body.password) or not any(c.isdigit() for c in body.password):
         raise HTTPException(status_code=400, detail="密码需要同时包含字母和数字")
+
+    # 邮件服务已配置时，必须验证 OTP
+    if is_email_service_configured():
+        if not body.verify_code:
+            raise HTTPException(status_code=400, detail="请先获取并填写邮箱验证码")
+
+        now = time.time()
+        otp_entry = _EMAIL_OTP_STORE.get(email)
+        if not otp_entry:
+            raise HTTPException(status_code=400, detail="验证码不存在，请重新发送")
+        if now > otp_entry["expire_at"]:
+            _EMAIL_OTP_STORE.pop(email, None)
+            raise HTTPException(status_code=400, detail="验证码已过期，请重新发送")
+        if otp_entry.get("used"):
+            raise HTTPException(status_code=400, detail="验证码已使用，请重新发送")
+        if otp_entry["code"] != body.verify_code.strip():
+            raise HTTPException(status_code=400, detail="验证码错误，请重新输入")
+
+        # 标记已用
+        otp_entry["used"] = True
 
     existing = db.query(User).filter(User.email == email).first()
     if existing:
@@ -232,7 +414,9 @@ def email_register(body: EmailRegisterRequest, db: Session = Depends(get_db)):
         db, email=email,
         password_hash=_hash_password(body.password),
         nickname=body.nickname or email.split("@")[0],
+        email_verified=True,  # OTP 已验证，直接标记已验证
     )
+
     return _login_response(db, user)
 
 
@@ -251,6 +435,8 @@ def email_login(body: EmailLoginRequest, request: Request, db: Session = Depends
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账号已被停用")
+    if settings.email_verify_enabled and not bool(user.email_verified):
+        raise HTTPException(status_code=403, detail="邮箱未验证，请先查收邮件完成验证")
 
     _clear_login_attempts(limit_key)
     # 自动迁移旧 SHA256 哈希到 bcrypt
@@ -334,8 +520,11 @@ async def google_callback(body: GoogleCallbackRequest, db: Session = Depends(get
     if not user:
         user = _create_new_user(
             db, email=email, oauth_provider="google", oauth_id=google_id,
-            nickname=name, avatar=avatar,
+            nickname=name, avatar=avatar, email_verified=True,
         )
+    elif email and not user.email_verified:
+        user.email_verified = True
+        db.commit()
     return _login_response(db, user)
 
 
@@ -411,9 +600,63 @@ async def github_callback(body: GithubCallbackRequest, db: Session = Depends(get
     if not user:
         user = _create_new_user(
             db, email=email, oauth_provider="github", oauth_id=github_id,
-            nickname=name, avatar=avatar,
+            nickname=name, avatar=avatar, email_verified=True,
         )
+    elif email and not user.email_verified:
+        user.email_verified = True
+        db.commit()
     return _login_response(db, user)
+
+
+@router.get("/email/verify")
+def verify_email(token: str = Query(...), db: Session = Depends(get_db)):
+    if not settings.email_verify_enabled:
+        return {"ok": True, "message": "邮箱验证功能已关闭"}
+
+    now = datetime.utcnow()
+    token_hash = _hash_verify_token(token)
+    row = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == token_hash,
+        EmailVerificationToken.used_at == None,
+        EmailVerificationToken.expire_at > now,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=400, detail="验证链接无效或已过期")
+
+    user = db.query(User).filter(User.id == row.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    row.used_at = now
+    user.email_verified = True
+    db.commit()
+    return {"ok": True, "message": "邮箱验证成功，请返回登录"}
+
+
+@router.post("/email/resend")
+def resend_verification_email(body: EmailResendRequest, db: Session = Depends(get_db)):
+    if not settings.email_verify_enabled:
+        return {"ok": True, "message": "邮箱验证功能已关闭"}
+    if not is_email_service_configured():
+        raise HTTPException(status_code=503, detail="邮件服务未配置，请联系管理员")
+
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return {"ok": True, "message": "若邮箱已注册，验证邮件将很快送达"}
+    if user.email_verified:
+        return {"ok": True, "message": "该邮箱已完成验证，无需重复发送"}
+
+    raw_token = _create_email_verification_token(db, user.id)
+    verify_url = _build_email_verify_url(raw_token)
+    try:
+        send_verification_email(user.email or "", user.nickname or "", verify_url)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"验证邮件发送失败: {exc}")
+    return {"ok": True, "message": "验证邮件已发送，请前往邮箱查收"}
 
 
 # ═══════════════════════════════════════════════
@@ -450,12 +693,20 @@ async def oauth_callback(body: OAuthCallbackRequest, db: Session = Depends(get_d
 async def create_scene(db: Session = Depends(get_db)):
     scene_id = str(uuid.uuid4())
     expire_at = datetime.utcnow() + timedelta(minutes=30)
+    wechat_configured = bool(
+        settings.wechat_appid
+        and settings.wechat_appid not in ("", "your_wechat_appid")
+        and settings.wechat_appsecret
+        and settings.wechat_appsecret not in ("", "your_wechat_appsecret")
+    )
     try:
+        if not wechat_configured:
+            raise RuntimeError("微信公众号未配置")
         qr_data = await create_scene_qrcode(scene_id)
         qr_url = qr_data["qr_url"]
         ticket = qr_data["ticket"]
     except Exception as e:
-        if settings.debug:
+        if settings.debug or not wechat_configured:
             qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data={scene_id}"
             ticket = "dev_ticket"
         else:
@@ -502,7 +753,7 @@ def change_password(
         raise HTTPException(status_code=400, detail="原密码错误")
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="新密码至少 8 位")
-    if body.new_password.isdigit() or body.new_password.isalpha():
+    if not any(c.isalpha() for c in body.new_password) or not any(c.isdigit() for c in body.new_password):
         raise HTTPException(status_code=400, detail="新密码需同时包含字母和数字")
     current_user.password_hash = _hash_password(body.new_password)
     db.commit()

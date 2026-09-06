@@ -65,7 +65,7 @@ async def create_style_template(
     db.add(tmpl)
     db.commit()
     db.refresh(tmpl)
-    await knowledge_service.index_style_template(db, tmpl.id)
+    knowledge_service.index_style_template(db, tmpl.id)
     return {"id": tmpl.id, "name": tmpl.name}
 
 

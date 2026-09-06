@@ -2,11 +2,44 @@
 TikHub API 封装
 支持：抖音 / 小红书 / 微信视频号
 """
+import asyncio
 import httpx
-from typing import Optional
+import logging
+import ssl
+from typing import Any, Optional
 from config import settings
 
 BASE_URL = "https://api.tikhub.io"
+logger = logging.getLogger(__name__)
+
+
+class TikHubRequestError(RuntimeError):
+    """TikHub 上游请求失败（已完成可重试的传输层重试）。"""
+
+    def __init__(self, method: str, endpoint: str, attempts: int, cause: Exception):
+        self.method = method
+        self.endpoint = endpoint
+        self.attempts = attempts
+        self.cause = cause
+        super().__init__(self._build_message())
+
+    def _build_message(self) -> str:
+        # 不把完整 URL/查询参数暴露给前端；参数会出现在服务端 httpx 日志中。
+        reason = _friendly_transport_error(self.cause)
+        return f"上游视频接口连接失败（{reason}，已重试 {max(self.attempts - 1, 0)} 次）"
+
+
+def _friendly_transport_error(exc: Exception) -> str:
+    """把底层 SSL/网络错误转换成用户可理解且不泄露内部细节的提示。"""
+    text = str(exc or "").lower()
+    if isinstance(exc, ssl.SSLError) or "ssl" in text or "eof" in text:
+        return "TLS 连接被上游中断"
+    if isinstance(exc, httpx.TimeoutException) or "timeout" in text:
+        return "请求超时"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code if exc.response is not None else "未知"
+        return f"上游返回 HTTP {status}"
+    return "网络连接异常"
 
 class TikHubClient:
     def __init__(self):
@@ -14,27 +47,122 @@ class TikHubClient:
             "Authorization": f"Bearer {settings.tikhub_api_key}",
             "Content-Type": "application/json",
         }
-        self.timeout = 60.0
+        # 每次重试都创建新的 AsyncClient，避免复用被上游提前关闭的 TLS 连接。
+        self.timeout = httpx.Timeout(
+            connect=float(getattr(settings, "tikhub_connect_timeout_seconds", 15.0)),
+            read=float(getattr(settings, "tikhub_read_timeout_seconds", 60.0)),
+            write=float(getattr(settings, "tikhub_write_timeout_seconds", 30.0)),
+            pool=float(getattr(settings, "tikhub_pool_timeout_seconds", 15.0)),
+        )
+        self.max_retries = max(0, min(int(getattr(settings, "tikhub_max_retries", 2)), 5))
+        self.retry_backoff = max(
+            0.0, float(getattr(settings, "tikhub_retry_backoff_seconds", 0.8))
+        )
+        self.max_retry_statuses = frozenset({429, 500, 502, 503, 504})
+
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: Optional[dict] = None,
+        json_data: Any = None,
+    ) -> dict:
+        """调用 TikHub，并对瞬时 TLS/连接失败做有限重试。
+
+        SSL ``UNEXPECTED_EOF_WHILE_READING`` 通常由上游主动关闭空闲/握手连接
+        引起。每次尝试使用独立客户端，既不会复用坏连接，也不需要关闭证书校验。
+        HTTP 4xx（除 429）直接透传，避免把参数错误重复发送。
+        """
+        url = f"{BASE_URL}{endpoint}"
+        total_attempts = self.max_retries + 1
+        attempts_used = 0
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, total_attempts + 1):
+            attempts_used = attempt
+            try:
+                # 不跨请求复用连接；这对偶发 EOF 比长期持有一个 AsyncClient 更稳。
+                async with httpx.AsyncClient(
+                    timeout=self.timeout,
+                    follow_redirects=True,
+                ) as client:
+                    resp = await client.request(
+                        method,
+                        url,
+                        headers=self.headers,
+                        params=params or {},
+                        json=json_data if json_data is not None else {},
+                    )
+
+                if resp.status_code in self.max_retry_statuses and attempt < total_attempts:
+                    delay = self._retry_delay(attempt, resp.headers.get("Retry-After"))
+                    logger.warning(
+                        "TikHub %s %s returned %s; retrying in %.1fs (attempt %s/%s)",
+                        method,
+                        endpoint,
+                        resp.status_code,
+                        delay,
+                        attempt,
+                        total_attempts,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as exc:
+                # A final 429/5xx (or any 4xx) is an upstream response, not a
+                # transport failure. Keep its status/body available to callers.
+                last_error = exc
+                break
+            except Exception as exc:
+                if not self._is_retryable(exc) or attempt >= total_attempts:
+                    last_error = exc
+                    break
+                last_error = exc
+                delay = self._retry_delay(attempt)
+                logger.warning(
+                    "TikHub %s %s failed with %s (%s); retrying in %.1fs (attempt %s/%s)",
+                    method,
+                    endpoint,
+                    type(exc).__name__,
+                    _friendly_transport_error(exc),
+                    delay,
+                    attempt,
+                    total_attempts,
+                )
+                await asyncio.sleep(delay)
+
+        assert last_error is not None
+        if isinstance(last_error, httpx.HTTPStatusError):
+            raise last_error
+        raise TikHubRequestError(method, endpoint, attempts_used, last_error) from last_error
+
+    def _retry_delay(self, attempt: int, retry_after: Optional[str] = None) -> float:
+        """Exponential backoff, honoring a bounded numeric Retry-After value."""
+        try:
+            server_delay = float(retry_after) if retry_after else 0.0
+        except (TypeError, ValueError):
+            server_delay = 0.0
+        exponential = self.retry_backoff * (2 ** max(attempt - 1, 0))
+        return min(max(exponential, server_delay), 10.0)
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        # ``RemoteProtocolError`` covers a peer closing an HTTP/1.1 response;
+        # NetworkError/TimeoutException cover SSL EOF wrapped by httpcore.
+        if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
+            return True
+        if isinstance(exc, (ssl.SSLError, ConnectionError, EOFError)):
+            return True
+        return False
 
     async def _get(self, endpoint: str, params: dict = None) -> dict:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(
-                f"{BASE_URL}{endpoint}",
-                headers=self.headers,
-                params=params or {}
-            )
-            resp.raise_for_status()
-            return resp.json()
+        return await self._request("GET", endpoint, params=params)
 
-    async def _post(self, endpoint: str, json_data: dict = None) -> dict:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{BASE_URL}{endpoint}",
-                headers=self.headers,
-                json=json_data or {}
-            )
-            resp.raise_for_status()
-            return resp.json()
+    async def _post(self, endpoint: str, json_data: Any = None) -> dict:
+        return await self._request("POST", endpoint, json_data=json_data)
 
     # ─── 抖音 ───────────────────────────────────────────────
     async def douyin_get_user_by_unique_id(self, unique_id: str) -> dict:
@@ -45,10 +173,20 @@ class TikHubClient:
         )
 
     async def douyin_get_user_videos(self, sec_user_id: str, max_cursor: int = 0) -> dict:
-        """获取用户主页作品列表"""
+        """获取用户主页作品列表（抖音 App V3 接口）。
+
+        TikHub 的 Web 版本对部分账号会返回 400，官方文档也建议优先使用
+        App 接口；App V3 返回结构仍兼容 ``data.aweme_list``。
+        """
         return await self._get(
-            "/api/v1/douyin/web/fetch_user_post_videos",
-            {"sec_user_id": sec_user_id, "max_cursor": max_cursor, "count": 20}
+            "/api/v1/douyin/app/v3/fetch_user_post_videos",
+            {
+                "sec_user_id": sec_user_id,
+                "max_cursor": max_cursor,
+                "count": 20,
+                "sort_type": 0,
+                "channel": "normal",
+            }
         )
 
     async def douyin_get_video_detail(self, aweme_id: str) -> dict:
@@ -74,12 +212,12 @@ class TikHubClient:
         )
 
     async def xhs_get_user_notes(self, user_id: str, cursor: str = "") -> dict:
-        """获取小红书用户笔记列表（app 接口）"""
-        params = {"user_id": user_id, "num": 30}
+        """获取小红书用户发布笔记列表（App V2 接口）。"""
+        params = {"user_id": user_id}
         if cursor:
             params["cursor"] = cursor
         return await self._get(
-            "/api/v1/xiaohongshu/app/get_user_notes",
+            "/api/v1/xiaohongshu/app_v2/get_user_posted_notes",
             params
         )
 
@@ -173,6 +311,42 @@ class TikHubClient:
         return await self._get(
             "/api/v1/douyin/web/fetch_user_search_result",
             {"keyword": keyword, "count": count, "offset": 0}
+        )
+
+    # ─── 抖音热点榜（Douyin-Billboard-API）────────────────────
+    async def douyin_billboard_fetch_hot_total_video_list(self, page: int = 1, page_size: int = 20) -> dict:
+        """获取视频热榜"""
+        return await self._post(
+            "/api/v1/douyin/billboard/fetch_hot_total_video_list",
+            {"page": page, "page_size": page_size}
+        )
+
+    async def douyin_billboard_fetch_hot_total_low_fan_list(self, page: int = 1, page_size: int = 20) -> dict:
+        """获取低粉爆款榜"""
+        return await self._post(
+            "/api/v1/douyin/billboard/fetch_hot_total_low_fan_list",
+            {"page": page, "page_size": page_size}
+        )
+
+    async def douyin_billboard_fetch_hot_total_high_play_list(self, page: int = 1, page_size: int = 20) -> dict:
+        """获取高完播率榜"""
+        return await self._post(
+            "/api/v1/douyin/billboard/fetch_hot_total_high_play_list",
+            {"page": page, "page_size": page_size}
+        )
+
+    async def douyin_billboard_fetch_hot_total_high_like_list(self, page: int = 1, page_size: int = 20) -> dict:
+        """获取高点赞率榜"""
+        return await self._post(
+            "/api/v1/douyin/billboard/fetch_hot_total_high_like_list",
+            {"page": page, "page_size": page_size}
+        )
+
+    async def douyin_billboard_fetch_hot_total_high_fan_list(self, page: int = 1, page_size: int = 20) -> dict:
+        """获取高涨粉率榜"""
+        return await self._post(
+            "/api/v1/douyin/billboard/fetch_hot_total_high_fan_list",
+            {"page": page, "page_size": page_size}
         )
 
     async def xhs_search_notes(self, keyword: str, sort: str = "general", page: int = 1) -> dict:

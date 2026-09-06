@@ -1,21 +1,41 @@
-import asyncio
-import uuid
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database import SessionLocal, get_db
+from database import get_db
 from models import Creator, CreatorVideo, Document, TenantCreator, User, VideoAnalysis
 from routers.deps import require_active_subscription
 from services.analyzer import analyzer_service
-from services.crawler import crawler_service
+from services.analysis_jobs import (
+    create_discover_task,
+    get_running_discover_task,
+    get_task,
+    start_discover_task,
+)
+from services.crawler import CrawlerFetchError, crawler_service
 from services.generator import generator_service
 from services.topic_hunter import topic_hunter
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-_discover_tasks: dict[str, dict] = {}
+STYLE_ANALYSIS_MIN_VIDEOS = 30
+
+
+def _count_analyzed_videos_for_creator(db: Session, creator_id: int, tenant_id: int) -> int:
+    return (
+        db.query(func.count(VideoAnalysis.id))
+        .join(CreatorVideo, CreatorVideo.id == VideoAnalysis.video_id)
+        .filter(
+            CreatorVideo.creator_id == creator_id,
+            VideoAnalysis.tenant_id == tenant_id,
+        )
+        .scalar()
+        or 0
+    )
 
 
 class AddCreatorRequest(BaseModel):
@@ -59,12 +79,34 @@ def list_creators(
         .all()
     )
 
+    analyzed_counts: dict[int, int] = {}
+    if creators:
+        creator_ids = [c.id for c in creators]
+        rows = (
+            db.query(
+                CreatorVideo.creator_id,
+                func.count(VideoAnalysis.id).label("analyzed_count"),
+            )
+            .join(VideoAnalysis, VideoAnalysis.video_id == CreatorVideo.id)
+            .filter(
+                CreatorVideo.creator_id.in_(creator_ids),
+                VideoAnalysis.tenant_id == current_user.tenant_id,
+            )
+            .group_by(CreatorVideo.creator_id)
+            .all()
+        )
+        analyzed_counts = {
+            row.creator_id: int(row.analyzed_count or 0)
+            for row in rows
+        }
+
     result = []
     for creator in creators:
         style_template = next(
             (t for t in creator.style_templates if t.tenant_id == current_user.tenant_id),
             None,
         )
+        analyzed_count = analyzed_counts.get(creator.id, 0)
         result.append(
             {
                 "id": creator.id,
@@ -81,6 +123,8 @@ def list_creators(
                 "has_style": style_template is not None,
                 "style_updated_at": style_template.updated_at if style_template else None,
                 "style_name": style_template.name if style_template else None,
+                "analyzed_videos_count": analyzed_count,
+                "style_extract_ready": analyzed_count >= STYLE_ANALYSIS_MIN_VIDEOS,
             }
         )
     return result
@@ -139,7 +183,11 @@ async def crawl_creator(
             "total_videos": total,
             "message": f"新增 {new_count} 条视频内容",
         }
+    except CrawlerFetchError as exc:
+        logger.warning("creator crawl upstream failure creator_id=%s: %s", creator_id, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("creator crawl failed creator_id=%s", creator_id)
         raise HTTPException(status_code=400, detail=str(exc))
 
 
@@ -159,6 +207,20 @@ async def analyze_creator_style(
     creator = db.query(Creator).filter(Creator.id == creator_id).first()
     if not creator:
         raise HTTPException(status_code=404, detail="Creator not found")
+
+    analyzed_count = _count_analyzed_videos_for_creator(
+        db,
+        creator_id=creator_id,
+        tenant_id=current_user.tenant_id,
+    )
+    if analyzed_count < STYLE_ANALYSIS_MIN_VIDEOS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"需先完成至少 {STYLE_ANALYSIS_MIN_VIDEOS} 条视频爆款分析后再提取风格，"
+                f"当前仅 {analyzed_count} 条"
+            ),
+        )
 
     try:
         return await generator_service.analyze_style(db, creator_id, tenant_id=current_user.tenant_id)
@@ -391,47 +453,27 @@ async def auto_discover_and_crawl(
     current_user: User = Depends(require_active_subscription),
 ):
     """一键发现头部博主并批量入库（异步后台任务）。"""
-    current_tenant_id = current_user.tenant_id
-    task_id = str(uuid.uuid4())
-    _discover_tasks[task_id] = {
-        "status": "pending",
-        "progress": 0,
-        "total": 0,
-        "log": [],
-        "result": None,
-    }
+    running_task = get_running_discover_task(current_user.tenant_id)
+    if running_task:
+        return {
+            "task_id": running_task["task_id"],
+            "message": "已有进行中的自动发现任务",
+        }
 
-    async def run_task():
-        db = SessionLocal()
-        task = _discover_tasks[task_id]
-        task["status"] = "running"
-        try:
-            async def on_progress(step, total, msg, state="processing"):
-                task["progress"] = step
-                task["total"] = total
-                task["log"].append(msg)
-                if len(task["log"]) > 100:
-                    task["log"] = task["log"][-100:]
-
-            result = await crawler_service.auto_discover_and_crawl(
-                db=db,
-                keyword=req.keyword,
-                limit=req.limit,
-                platforms=req.platforms,
-                progress_callback=on_progress,
-                tenant_id=current_tenant_id,
-            )
-            task["status"] = "done"
-            task["result"] = result
-            task["progress"] = task["total"]
-        except Exception as exc:
-            task["status"] = "error"
-            task["log"].append(f"错误: {str(exc)}")
-        finally:
-            db.close()
-
-    background_tasks.add_task(run_task)
-    return {"task_id": task_id, "message": "任务已启动"}
+    task = create_discover_task(
+        tenant_id=current_user.tenant_id,
+        keyword=req.keyword,
+        limit=req.limit,
+        platforms=req.platforms,
+    )
+    start_discover_task(
+        task_id=task["task_id"],
+        tenant_id=current_user.tenant_id,
+        keyword=req.keyword,
+        limit=req.limit,
+        platforms=req.platforms,
+    )
+    return {"task_id": task["task_id"], "message": "任务已启动"}
 
 
 @router.get("/creators/discover-task/{task_id}")
@@ -440,7 +482,7 @@ def get_discover_task(
     current_user: User = Depends(require_active_subscription),
 ):
     """查询自动发现任务的进度。"""
-    task = _discover_tasks.get(task_id)
+    task = get_task(task_id, tenant_id=current_user.tenant_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return task

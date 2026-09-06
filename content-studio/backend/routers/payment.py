@@ -5,6 +5,7 @@
 import uuid
 import time
 import hashlib
+import hmac
 import httpx
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -40,12 +41,12 @@ def _yungouos_sign(params: dict) -> str:
 
 
 def _verify_notify_sign(params: dict) -> bool:
-    """验证 YunGouOS 回调签名"""
+    """验证 YunGouOS 回调签名（使用 hmac.compare_digest 防时序攻击）"""
     sign = params.get("sign", "")
     if not sign:
         return False
     expected = _yungouos_sign(params)
-    return sign == expected
+    return hmac.compare_digest(sign.upper(), expected.upper())
 
 
 # -- Pydantic --
@@ -227,6 +228,14 @@ async def yungouos_notify(request: Request, db: Session = Depends(get_db)):
         # 幂等：已支付订单直接忽略重复通知
         if order.status == "paid":
             return "SUCCESS"
+
+        # 校验回调金额与订单金额一致，防止篡改少额付款激活订阅
+        try:
+            callback_money_fen = round(float(params.get("money", "0")) * 100)
+        except (ValueError, TypeError):
+            return "FAIL"
+        if callback_money_fen != order.amount_fen:
+            return "FAIL"
 
         # 幂等：支付流水号已处理过则直接成功返回，避免重复激活订阅
         if pay_no:

@@ -85,6 +85,9 @@ class CreatorIntelCard(Base):
     positioning = Column(Text)                           # 账号定位分析
     video_style = Column(Text)                           # 视频风格特征
     common_topics = Column(JSON, default=list)           # 常用话题列表
+    viral_formula = Column(Text)                         # 爆款公式
+    strengths = Column(JSON, default=list)               # 核心竞争优势
+    weaknesses = Column(JSON, default=list)              # 可改进的地方
     comment_pain_points = Column(JSON, default=list)     # 评论区痛点挖掘
     summary = Column(Text)                               # 综合情报摘要
     raw_analysis = Column(Text)                          # AI原始分析JSON
@@ -133,6 +136,27 @@ class VideoAnalysis(Base):
     topic = relationship("Topic", backref="analysis", uselist=False, foreign_keys=[topic_id])
 
 
+class AnalysisTask(Base):
+    """批量视频分析任务"""
+    __tablename__ = "analysis_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(String(64), unique=True, nullable=False, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    creator_id = Column(Integer, ForeignKey("creators.id"), nullable=True, index=True)
+    task_type = Column(String(32), nullable=False, default="creator_video_batch")
+    status = Column(String(20), nullable=False, default="queued")  # queued / running / done / error
+    done = Column(Integer, nullable=False, default=0)
+    total = Column(Integer, nullable=False, default=0)
+    success = Column(Integer, nullable=False, default=0)
+    failed = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+    log = Column(JSON, default=list)
+    result = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Document(Base):
     """产品资料文档"""
     __tablename__ = "documents"
@@ -149,6 +173,7 @@ class Document(Base):
     folder_name = Column(String(100), nullable=True)     # 文件夹分类
     source_type = Column(String(20), nullable=True)      # creator_video / topic / upload
     source_ref = Column(String(200), nullable=True)      # 来源引用（视频ID等）
+    ai_summary = Column(Text, nullable=True)              # AI理解摘要
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -196,6 +221,11 @@ class Generation(Base):
     output_body = Column(Text)
     output_cta = Column(Text)
     output_full = Column(Text)
+    debug_info = Column(JSON, default=dict)             # 结构化调试信息
+    mode_branch = Column(String(32), nullable=True)     # doc+viral / doc_only / viral_only / plain
+    temperature_used = Column(Float, nullable=True)     # 本次调用使用的温度
+    doc_chars_injected = Column(Integer, default=0)     # 注入资料库字符数
+    viral_chars_injected = Column(Integer, default=0)   # 注入爆款洞察字符数
     rating = Column(Integer)                             # 用户评分 1-5
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -245,6 +275,7 @@ class Topic(Base):
     like_play_ratio = Column(Float, default=0.0)         # 点赞/播放
     comment_play_ratio = Column(Float, default=0.0)      # 评论/播放
     collect_play_ratio = Column(Float, default=0.0)      # 收藏/播放
+    viral_reason = Column(Text, nullable=True)            # 一句话爆款原因摘要
 
 
 # ═══════════════════════════════════════════════
@@ -271,6 +302,7 @@ class User(Base):
     wechat_openid = Column(String(100), unique=True, nullable=True, index=True)
     wechat_unionid = Column(String(100), nullable=True, index=True)
     email = Column(String(200), unique=True, nullable=True, index=True)
+    email_verified = Column(Boolean, default=True)
     password_hash = Column(String(200), nullable=True)
     oauth_provider = Column(String(20), nullable=True)   # google / github
     oauth_id = Column(String(200), nullable=True)        # 第三方 OAuth 唯一 ID
@@ -343,6 +375,22 @@ class PaymentOrder(Base):
     user = relationship("User", back_populates="orders")
 
 
+class ContentSchedule(Base):
+    """内容排期"""
+    __tablename__ = "content_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    generation_id = Column(Integer, ForeignKey("generations.id"), nullable=True, index=True)
+    title = Column(String(300), nullable=False)
+    content = Column(Text, nullable=True)
+    platform = Column(String(20), default="douyin")
+    scheduled_date = Column(DateTime, nullable=False, index=True)
+    status = Column(String(20), default="draft")  # draft / scheduled / published
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class DocumentFolder(Base):
     """产品资料文件夹（持久化空文件夹）"""
     __tablename__ = "document_folders"
@@ -365,6 +413,18 @@ class WechatScene(Base):
     openid = Column(String(100), nullable=True)          # 扫码用户的 openid
     token = Column(Text, nullable=True)                  # 生成的 JWT（扫码成功后存入）
     expire_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EmailVerificationToken(Base):
+    """邮箱验证令牌"""
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(128), unique=True, nullable=False, index=True)
+    expire_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

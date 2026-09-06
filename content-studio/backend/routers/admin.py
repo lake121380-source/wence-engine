@@ -13,6 +13,7 @@ import hashlib
 import uuid
 import csv
 import io
+import time
 import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional
@@ -24,6 +25,34 @@ from sqlalchemy import func, case, extract
 from sqlalchemy.orm import Session
 
 from config import settings
+
+# ── 管理员登录限流（与 auth.py 的用户限流独立维护）──
+_ADMIN_LOGIN_WINDOW = 60   # 秒
+_ADMIN_LOGIN_MAX = 5        # 窗口内最大失败次数
+_admin_login_attempts: dict[str, list[float]] = {}
+
+
+def _admin_rate_limit_check(username: str) -> int:
+    """返回 0 表示允许；正整数表示需等待的秒数"""
+    key = username.strip().lower()
+    now = time.time()
+    attempts = [ts for ts in _admin_login_attempts.get(key, []) if now - ts < _ADMIN_LOGIN_WINDOW]
+    if len(attempts) >= _ADMIN_LOGIN_MAX:
+        return max(1, int(_ADMIN_LOGIN_WINDOW - (now - attempts[0])))
+    _admin_login_attempts[key] = attempts
+    return 0
+
+
+def _admin_record_failure(username: str):
+    key = username.strip().lower()
+    now = time.time()
+    attempts = [ts for ts in _admin_login_attempts.get(key, []) if now - ts < _ADMIN_LOGIN_WINDOW]
+    attempts.append(now)
+    _admin_login_attempts[key] = attempts
+
+
+def _admin_clear_attempts(username: str):
+    _admin_login_attempts.pop(username.strip().lower(), None)
 from database import get_db
 from models import AdminUser, Tenant, User, Subscription, PaymentOrder, Creator, Topic, Generation, Document, StyleTemplate, OperatorViewpoint, DocumentFolder, TenantCreator, CreatorVideo, CreatorIntelCard, VideoAnalysis
 
@@ -101,11 +130,18 @@ class AdminLoginRequest(BaseModel):
 @router.post("/login")
 def admin_login(req: AdminLoginRequest, db: Session = Depends(get_db)):
     """管理员登录"""
+    retry_after = _admin_rate_limit_check(req.username)
+    if retry_after > 0:
+        raise HTTPException(status_code=429, detail=f"登录尝试过于频繁，请 {retry_after} 秒后重试")
+
     admin = db.query(AdminUser).filter(AdminUser.username == req.username).first()
     if not admin or not _verify_admin_password(req.password, admin.password_hash):
+        _admin_record_failure(req.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not admin.is_active:
+        _admin_record_failure(req.username)
         raise HTTPException(status_code=403, detail="账号已停用")
+    _admin_clear_attempts(req.username)
     # 自动迁移旧 SHA256 哈希到 bcrypt
     if not admin.password_hash.startswith("$2b$"):
         admin.password_hash = _hash_password(req.password)
@@ -133,14 +169,26 @@ def admin_me(admin: AdminUser = Depends(get_current_admin)):
 
 
 @router.post("/init")
-def admin_init(req: AdminLoginRequest, db: Session = Depends(get_db)):
+def admin_init(
+    req: AdminLoginRequest,
+    x_init_token: Optional[str] = Header(None, alias="x-init-token"),
+    db: Session = Depends(get_db),
+):
     """
     初始化第一个管理员账号（仅当不存在任何管理员时可用）。
-    部署后第一次访问管理端时调用。
+    调用方须在 Header 中携带 X-Init-Token，其值须与环境变量 ADMIN_INIT_TOKEN 一致。
+    管理员已存在则始终拒绝，防止覆盖攻击。
     """
+    init_token = getattr(settings, "admin_init_token", "") or ""
+    if not init_token:
+        raise HTTPException(status_code=503, detail="ADMIN_INIT_TOKEN 未配置，无法使用初始化接口")
+    if not x_init_token or x_init_token != init_token:
+        raise HTTPException(status_code=401, detail="X-Init-Token 无效")
+
     existing = db.query(AdminUser).first()
     if existing:
         raise HTTPException(status_code=400, detail="管理员已存在，无法重复初始化")
+
     admin = AdminUser(
         username=req.username,
         password_hash=_hash_password(req.password),
@@ -891,6 +939,7 @@ def list_topics(
 def list_generations(
     tenant_id: Optional[int] = None,
     keyword: Optional[str] = None,
+    platform: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
     db: Session = Depends(get_db),
@@ -898,6 +947,8 @@ def list_generations(
 ):
     """生成内容列表"""
     q = db.query(Generation)
+    if platform and platform != "all":
+        q = q.filter(Generation.platform == platform)
     if tenant_id:
         q = q.filter(Generation.tenant_id == tenant_id)
     if keyword:
@@ -915,6 +966,9 @@ def list_generations(
             "title": g.output_title or g.topic or "",
             "content_preview": (full[:100] + "...") if len(full) > 100 else full,
             "full_content": full,
+            "platform": g.platform,
+            "rating": g.rating,
+            "word_count": len(full),
             "tenant_id": g.tenant_id,
             "tenant_name": tenant.name if tenant else "",
             "created_at": g.created_at.isoformat() if g.created_at else None,

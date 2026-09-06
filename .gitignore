@@ -46,3 +46,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+AGENTS.md
+
+runtime-data/
+.venv/

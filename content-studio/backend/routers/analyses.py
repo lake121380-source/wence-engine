@@ -1,19 +1,22 @@
 import asyncio
-import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import SessionLocal, get_db
+from database import get_db
 from models import Creator, CreatorVideo, TenantCreator, Topic, User
 from routers.deps import require_active_subscription
 from services.analyzer import analyzer_service
+from services.analysis_jobs import (
+    create_creator_batch_task,
+    get_running_task_for_creator,
+    get_task,
+    start_creator_batch_task,
+)
 from services.topic_hunter import topic_hunter
 
 router = APIRouter()
-
-_batch_analyze_tasks: dict[str, dict] = {}
 
 
 class BatchAnalyzeRequest(BaseModel):
@@ -27,7 +30,6 @@ async def analyze_video(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """对单条博主视频进行爆款三维分析"""
     video = db.query(CreatorVideo).filter(CreatorVideo.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="视频不存在")
@@ -40,7 +42,11 @@ async def analyze_video(
         raise HTTPException(status_code=404, detail="视频不存在")
 
     try:
-        return await analyzer_service.analyze_video_viral(db, video_id=video_id, tenant_id=current_user.tenant_id)
+        return await analyzer_service.analyze_video_viral(
+            db,
+            video_id=video_id,
+            tenant_id=current_user.tenant_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -53,7 +59,6 @@ def get_video_analysis(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """获取视频已有的爆款分析结果"""
     video = db.query(CreatorVideo).filter(CreatorVideo.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="视频不存在")
@@ -77,7 +82,6 @@ async def analyze_topic(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """对选题库中的视频进行爆款分析。"""
     topic = db.query(Topic).filter(Topic.id == topic_id, Topic.user_id == current_user.id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="选题不存在")
@@ -103,10 +107,20 @@ async def analyze_topic(
                 topic.video_url = detail["share_url"]
             db.commit()
         except Exception as exc:
-            print(f"[Router] 分析前自动获取语音内容失败 (topic {topic_id}): {exc}")
+            print(f"[Router] analyze_topic prefetch failed (topic={topic_id}): {exc}")
 
     try:
-        return await analyzer_service.analyze_video_viral(db, topic_id=topic_id, tenant_id=current_user.tenant_id)
+        result = await analyzer_service.analyze_video_viral(
+            db,
+            topic_id=topic_id,
+            tenant_id=current_user.tenant_id,
+        )
+        return {
+            **result,
+            "script": topic.script or "",
+            "description": topic.description or "",
+            "title": topic.title or "",
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -119,14 +133,19 @@ def get_topic_analysis(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """获取选题已有的爆款分析结果"""
     topic = db.query(Topic).filter(Topic.id == topic_id, Topic.user_id == current_user.id).first()
     if not topic:
         raise HTTPException(status_code=404, detail="选题不存在")
+
     result = analyzer_service.get_topic_analysis(db, topic_id, tenant_id=current_user.tenant_id)
     if not result:
         raise HTTPException(status_code=404, detail="该选题尚未分析")
-    return result
+    return {
+        **result,
+        "script": topic.script or "",
+        "description": topic.description or "",
+        "title": topic.title or "",
+    }
 
 
 @router.post("/topics/batch-analyze")
@@ -135,7 +154,6 @@ async def batch_analyze_topics(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """批量分析选题/视频爆款"""
     results = []
 
     if req.topic_ids:
@@ -152,7 +170,11 @@ async def batch_analyze_topics(
             results.append({"topic_id": tid, "error": "选题不存在"})
             continue
         try:
-            result = await analyzer_service.analyze_video_viral(db, topic_id=tid, tenant_id=current_user.tenant_id)
+            result = await analyzer_service.analyze_video_viral(
+                db,
+                topic_id=tid,
+                tenant_id=current_user.tenant_id,
+            )
             results.append(result)
             await asyncio.sleep(0.3)
         except Exception as exc:
@@ -178,7 +200,11 @@ async def batch_analyze_topics(
             results.append({"video_id": vid, "error": "视频不存在"})
             continue
         try:
-            result = await analyzer_service.analyze_video_viral(db, video_id=vid, tenant_id=current_user.tenant_id)
+            result = await analyzer_service.analyze_video_viral(
+                db,
+                video_id=vid,
+                tenant_id=current_user.tenant_id,
+            )
             results.append(result)
             await asyncio.sleep(0.3)
         except Exception as exc:
@@ -194,7 +220,6 @@ async def batch_analyze_creator_videos(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """批量分析某博主的全部视频"""
     sub = db.query(TenantCreator).filter(
         TenantCreator.creator_id == creator_id,
         TenantCreator.tenant_id == current_user.tenant_id,
@@ -213,19 +238,21 @@ async def batch_analyze_creator_videos(
         raise HTTPException(status_code=404, detail="该博主暂无视频")
 
     video_ids = [v.id for v in videos]
-    results = await analyzer_service.batch_analyze_videos(db, video_ids, tenant_id=current_user.tenant_id)
+    results = await analyzer_service.batch_analyze_videos(
+        db,
+        video_ids,
+        tenant_id=current_user.tenant_id,
+    )
     return {"total": len(results), "results": results}
 
 
 @router.post("/creators/{creator_id}/videos/analyze-async")
 async def batch_analyze_creator_videos_async(
     creator_id: int,
-    background_tasks: BackgroundTasks,
     limit: int = 200,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """批量分析某博主全部视频（异步后台任务，可关闭页面）"""
     sub = db.query(TenantCreator).filter(
         TenantCreator.creator_id == creator_id,
         TenantCreator.tenant_id == current_user.tenant_id,
@@ -243,48 +270,33 @@ async def batch_analyze_creator_videos_async(
     if not videos:
         raise HTTPException(status_code=404, detail="该博主暂无视频")
 
+    running_task = get_running_task_for_creator(
+        creator_id=creator_id,
+        tenant_id=current_user.tenant_id,
+    )
+    if running_task:
+        return {
+            "task_id": running_task["task_id"],
+            "total": running_task["total"],
+            "message": "已有进行中的批量分析任务",
+        }
+
     video_ids = [v.id for v in videos]
-    current_tenant_id = current_user.tenant_id
-    task_id = str(uuid.uuid4())
-    _batch_analyze_tasks[task_id] = {
-        "status": "running",
-        "done": 0,
+    task = create_creator_batch_task(
+        creator_id=creator_id,
+        tenant_id=current_user.tenant_id,
+        total=len(video_ids),
+    )
+    start_creator_batch_task(
+        task_id=task["task_id"],
+        video_ids=video_ids,
+        tenant_id=current_user.tenant_id,
+    )
+    return {
+        "task_id": task["task_id"],
         "total": len(video_ids),
-        "success": 0,
-        "failed": 0,
+        "message": "分析任务已在后台启动",
     }
-
-    async def run_task():
-        task_db = SessionLocal()
-        task = _batch_analyze_tasks[task_id]
-        semaphore = asyncio.Semaphore(2)
-
-        async def analyze_one(vid):
-            async with semaphore:
-                try:
-                    await analyzer_service.analyze_video_viral(
-                        task_db,
-                        video_id=vid,
-                        tenant_id=current_tenant_id,
-                    )
-                    task["success"] += 1
-                except Exception:
-                    task["failed"] += 1
-                finally:
-                    task["done"] += 1
-                await asyncio.sleep(1)
-
-        try:
-            await asyncio.gather(*[analyze_one(vid) for vid in video_ids])
-            task["status"] = "done"
-        except Exception as exc:
-            task["status"] = "error"
-            task["error"] = str(exc)
-        finally:
-            task_db.close()
-
-    background_tasks.add_task(run_task)
-    return {"task_id": task_id, "total": len(video_ids), "message": "分析任务已在后台启动"}
 
 
 @router.get("/creators/analyze-task/{task_id}")
@@ -292,8 +304,7 @@ def get_analyze_task(
     task_id: str,
     current_user: User = Depends(require_active_subscription),
 ):
-    """查询批量分析任务进度"""
-    task = _batch_analyze_tasks.get(task_id)
+    task = get_task(task_id, tenant_id=current_user.tenant_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return task

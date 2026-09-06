@@ -2,7 +2,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -18,7 +19,7 @@ from models import (
     User,
     VideoAnalysis,
 )
-from routers.deps import require_active_subscription
+from routers.deps import get_open_api_user, require_active_subscription
 from services.generator import generator_service
 from services.knowledge import knowledge_service
 
@@ -28,6 +29,7 @@ router = APIRouter()
 class GenerateRequest(BaseModel):
     topic: str
     platform: str = "douyin"
+    target_word_count: Optional[int] = Field(default=None, ge=100, le=2000)
     style_template_id: Optional[int] = None
     product_doc_ids: list[int] = []
     creator_ids: list[int] = []
@@ -42,75 +44,37 @@ async def generate_content(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    tid = current_user.tenant_id
+    _validate_generate_request(req, db, current_user)
+    return await _run_generate_request(req, db, current_user)
 
-    if req.product_doc_ids:
-        valid = db.query(Document.id).filter(
-            Document.id.in_(req.product_doc_ids),
-            Document.tenant_id == tid,
-        ).all()
-        valid_ids = {r.id for r in valid}
-        invalid = [i for i in req.product_doc_ids if i not in valid_ids]
-        if invalid:
-            raise HTTPException(status_code=403, detail=f"无权访问文档: {invalid}")
 
-    if req.creator_ids:
-        valid = db.query(TenantCreator.creator_id).filter(
-            TenantCreator.creator_id.in_(req.creator_ids),
-            TenantCreator.tenant_id == tid,
-        ).all()
-        valid_ids = {r.creator_id for r in valid}
-        invalid = [i for i in req.creator_ids if i not in valid_ids]
-        if invalid:
-            raise HTTPException(status_code=403, detail=f"无权访问博主: {invalid}")
+@router.post("/open-api/generate")
+async def generate_content_open_api(
+    req: GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_open_api_user),
+):
+    """开放 API：通过 X-API-Key 调用文案生成（绑定到固定租户用户）。"""
+    _validate_generate_request(req, db, current_user)
+    return await _run_generate_request(req, db, current_user)
 
-    if req.viewpoint_ids:
-        valid = db.query(OperatorViewpoint.id).filter(
-            OperatorViewpoint.id.in_(req.viewpoint_ids),
-            OperatorViewpoint.user_id == current_user.id,
-        ).all()
-        valid_ids = {r.id for r in valid}
-        invalid = [i for i in req.viewpoint_ids if i not in valid_ids]
-        if invalid:
-            raise HTTPException(status_code=403, detail=f"无权访问观点: {invalid}")
 
-    if req.style_template_id:
-        tmpl = db.query(StyleTemplate).filter(
-            StyleTemplate.id == req.style_template_id,
-            StyleTemplate.tenant_id == tid,
-        ).first()
-        if not tmpl:
-            raise HTTPException(status_code=403, detail="无权访问该风格模板")
-
-    if req.viral_analysis_ids:
-        valid = db.query(VideoAnalysis.id).filter(
-            VideoAnalysis.id.in_(req.viral_analysis_ids),
-            VideoAnalysis.tenant_id == tid,
-        ).all()
-        valid_ids = {r.id for r in valid}
-        invalid = [i for i in req.viral_analysis_ids if i not in valid_ids]
-        if invalid:
-            raise HTTPException(status_code=403, detail=f"无权访问爆款分析: {invalid}")
-
+async def _run_generate_request(req: GenerateRequest, db: Session, current_user: User) -> dict:
     try:
         result = await generator_service.generate(
             db=db,
             topic=req.topic,
             platform=req.platform,
+            target_word_count=req.target_word_count,
             style_template_id=req.style_template_id,
             product_doc_ids=req.product_doc_ids,
             creator_ids=req.creator_ids,
             viewpoint_ids=req.viewpoint_ids if req.viewpoint_ids else None,
             viral_analysis_ids=req.viral_analysis_ids if req.viral_analysis_ids else None,
             tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
             history=req.history,
         )
-        if isinstance(result, dict) and result.get("id"):
-            gen = db.query(Generation).filter(Generation.id == result["id"]).first()
-            if gen:
-                gen.tenant_id = current_user.tenant_id
-                gen.user_id = current_user.id
-                db.commit()
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -165,37 +129,21 @@ async def generate_content_stream(
 
     async def event_stream():
         try:
-            gen_id = None
             async for chunk in generator_service.generate_stream(
                 db=db,
                 topic=req.topic,
                 platform=req.platform,
+                target_word_count=req.target_word_count,
                 style_template_id=req.style_template_id,
                 product_doc_ids=req.product_doc_ids,
                 creator_ids=req.creator_ids,
                 viewpoint_ids=req.viewpoint_ids if req.viewpoint_ids else None,
                 viral_analysis_ids=req.viral_analysis_ids if req.viral_analysis_ids else None,
                 tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
                 history=req.history,
             ):
-                # 捕获 done 事件中的 gen_id 用于更新 tenant/user
-                if chunk.startswith("event: done"):
-                    import json as _json
-                    try:
-                        data_line = chunk.split("data: ", 1)[1].strip()
-                        result = _json.loads(data_line)
-                        gen_id = result.get("id")
-                    except Exception:
-                        pass
                 yield chunk
-
-            # 更新 tenant_id / user_id
-            if gen_id:
-                gen = db.query(Generation).filter(Generation.id == gen_id).first()
-                if gen:
-                    gen.tenant_id = current_user.tenant_id
-                    gen.user_id = current_user.id
-                    db.commit()
         except Exception as exc:
             import json as _json
             yield f"event: error\ndata: {_json.dumps(str(exc), ensure_ascii=False)}\n\n"
@@ -214,17 +162,33 @@ async def generate_content_stream(
 def list_generations(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=200),
+    platform: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    rating: Optional[int] = Query(default=None, ge=1, le=5),
+    liked_only: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    gens = (
-        db.query(Generation)
-        .filter(Generation.user_id == current_user.id)
-        .order_by(Generation.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    qset = db.query(Generation).filter(Generation.user_id == current_user.id)
+
+    if platform:
+        qset = qset.filter(Generation.platform == platform)
+    if rating is not None:
+        qset = qset.filter(Generation.rating == rating)
+    if liked_only:
+        qset = qset.filter(Generation.rating >= 4)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        qset = qset.filter(
+            or_(
+                Generation.topic.ilike(pattern),
+                Generation.output_full.ilike(pattern),
+                Generation.output_body.ilike(pattern),
+            )
+        )
+
+    gens = qset.order_by(Generation.created_at.desc()).offset(offset).limit(limit).all()
+
     return [
         {
             "id": g.id,
@@ -232,6 +196,7 @@ def list_generations(
             "platform": g.platform,
             "output_body": g.output_body,
             "output_full": g.output_full or g.output_body,
+            "rating": g.rating,
             "created_at": g.created_at,
         }
         for g in gens

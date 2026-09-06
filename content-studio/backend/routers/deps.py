@@ -5,9 +5,11 @@ from datetime import datetime
 from fastapi import Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import Optional
+import hmac
 
 from database import get_db
 from services.auth import decode_jwt_token
+from config import settings
 
 
 def _ensure_session_token_fresh(user, token_session_version: int):
@@ -68,3 +70,43 @@ def require_active_subscription(
             detail="订阅已到期，请续费后继续使用",
         )
     return current_user
+
+
+def _extract_open_api_key(authorization: Optional[str], x_api_key: Optional[str]) -> str:
+    if x_api_key:
+        return x_api_key.strip()
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ").strip()
+    return ""
+
+
+def get_open_api_user(
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """开放 API 认证：使用 X-API-Key（或 Authorization: Bearer <key>）绑定到固定用户。"""
+    from models import User
+
+    if not settings.open_api_enabled:
+        raise HTTPException(status_code=403, detail="Open API 未启用")
+
+    expected = (settings.open_api_key or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Open API 密钥未配置")
+
+    provided = _extract_open_api_key(authorization, x_api_key)
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Open API 密钥无效")
+
+    if settings.open_api_user_id <= 0:
+        raise HTTPException(status_code=503, detail="Open API 绑定用户未配置")
+
+    user = db.query(User).filter(User.id == settings.open_api_user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=503, detail="Open API 绑定用户不可用")
+
+    if settings.open_api_require_subscription and not user.is_subscription_active:
+        raise HTTPException(status_code=402, detail="Open API 绑定用户订阅已到期")
+
+    return user

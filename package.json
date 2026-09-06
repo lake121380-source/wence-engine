@@ -8,8 +8,9 @@
     "build:admin": "vite build content-studio/admin --base /admin/ --outDir ../../dist/client/admin",
     "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "build": "npm run build:frontend && npm run build:admin && npm run build:server",
-    "lint": "node -e 'console.log(\"No lint issues\")'",
-    "start": "node dist/server.cjs"
+    "test:gateway": "node --test tests/*.test.mjs",
+    "start": "node dist/server.cjs",
+    "start:migrated": "powershell -ExecutionPolicy Bypass -File start-migrated.ps1"
   },
   "workspaces": [
     "content-studio/frontend",

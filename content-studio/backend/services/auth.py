@@ -5,6 +5,7 @@ import uuid
 import time
 import hmac
 import hashlib
+import urllib.parse
 import httpx
 from datetime import datetime, timedelta
 from typing import Optional
@@ -63,8 +64,9 @@ async def create_scene_qrcode(scene_id: str) -> dict:
         raise RuntimeError(f"创建扫码二维码失败: {data}")
 
     ticket = data["ticket"]
-    qr_url = f"https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket={ticket}"
-    return {"ticket": ticket, "qr_url": qr_url}
+    encoded_ticket = urllib.parse.quote(ticket, safe="")
+    qr_url = f"https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket={encoded_ticket}"
+    return {"ticket": ticket, "url": data.get("url", ""), "qr_url": qr_url}
 
 
 async def get_wx_userinfo_by_code(code: str) -> dict:

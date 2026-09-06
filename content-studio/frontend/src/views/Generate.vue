@@ -1180,47 +1180,12 @@ async function runGenerate(payload) {
       throw new Error(detail)
     }
 
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let finalResult = null
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
-      // 解析 SSE 事件
-      const lines = buffer.split('\n')
-      buffer = lines.pop() // 保留未完成的行
-
-      for (const line of lines) {
-        if (line.startsWith('event: done')) {
-          // 下一行是 data
-          continue
-        }
-        if (line.startsWith('event: error')) {
-          continue
-        }
-        if (line.startsWith('data: ')) {
-          const raw = line.slice(6)
-          try {
-            const parsed = JSON.parse(raw)
-            if (typeof parsed === 'string') {
-              // 文本 chunk
-              const idx = messages.value.findIndex((m) => m.id === streamMsgId)
-              if (idx >= 0) {
-                messages.value[idx].text += parsed
-              }
-              scrollToBottom()
-            } else if (parsed && typeof parsed === 'object' && parsed.id) {
-              // done 事件的完整结果
-              finalResult = parsed
-            }
-          } catch {}
-        }
-      }
-    }
+    const { consumeGenerationStream } = await import('../api/sse.js')
+    const finalResult = await consumeGenerationStream(response, text => {
+      const message = messages.value.find(m => m.id === streamMsgId)
+      if (message) message.text += text
+      scrollToBottom()
+    })
 
     // 替换 streaming 消息为 result 消息
     const idx = messages.value.findIndex((m) => m.id === streamMsgId)

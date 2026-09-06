@@ -161,13 +161,13 @@
         @drop.prevent="e => { showUploadModal = false; handleDrop(e) }"
         @click="triggerFileInput"
       >
-        <input ref="fileInputRef" type="file" accept=".pdf,.docx,.doc,.txt" multiple style="display:none"
+        <input ref="fileInputRef" type="file" accept=".pdf,.docx,.txt" multiple style="display:none"
           @change="e => { showUploadModal = false; handleFileChange(e) }" />
         <n-icon size="36" color="rgba(99,102,241,0.45)"><CloudUploadOutline /></n-icon>
         <div class="upload-text">
           {{ activeFolder && activeFolder !== '__none__' ? `上传到「${activeFolder}」` : '拖拽文件到这里，或点击选择' }}
         </div>
-        <div class="upload-hint">支持 PDF / Word / TXT，单文件最大 20MB</div>
+        <div class="upload-hint">支持 PDF / DOCX / TXT，单文件最大 10MB</div>
       </div>
       <template #footer>
         <n-space justify="end">
@@ -455,8 +455,12 @@ function handleDrop(e) {
 async function uploadFiles(files) {
   for (const file of files) {
     const ext = file.name.split('.').pop().toLowerCase()
-    if (!['pdf', 'docx', 'doc', 'txt'].includes(ext)) {
+    if (!['pdf', 'docx', 'txt'].includes(ext)) {
       message.warning(`${file.name} 格式不支持`)
+      continue
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      message.warning(`${file.name} 超过 10MB 限制`)
       continue
     }
     const q = { name: file.name, pct: 30, done: false, chunks: 0 }
@@ -467,10 +471,12 @@ async function uploadFiles(files) {
       const { data } = await documentsApi.upload(file, '', folder)
       q.chunks = data.chunks
       q.done = true
-      message.success(`${file.name} 上传成功，${data.chunks} 个分块`)
+      if (!data.text_extracted) message.warning(`${file.name} 已保存，未提取到文本，请检查是否为扫描件`)
+      else if (!data.indexed) message.warning(`${file.name} 已解析保存，知识检索索引暂不可用`)
+      else message.success(`${file.name} 上传成功，${data.chunks} 个分块`)
       await load()
     } catch (e) {
-      message.error(`${file.name} 上传失败`)
+      message.error(e.response?.data?.detail || `${file.name} 上传失败`)
       uploadQueue.value = uploadQueue.value.filter(x => x !== q)
     }
     setTimeout(() => { uploadQueue.value = uploadQueue.value.filter(x => x !== q) }, 4000)

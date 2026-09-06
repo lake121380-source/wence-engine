@@ -79,9 +79,56 @@ def _fetch_srt_url(subtitle_infos: list) -> str:
         return ""
 
 
+def _find_media_url(value, media_context: bool = False) -> str:
+    """从平台详情嵌套结构提取媒体直链，不返回封面或分享页。"""
+    if isinstance(value, dict):
+        for key in ("play_url", "download_url", "video_url", "audio_url"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                return candidate
+        for key in ("url_list", "urls"):
+            candidates = value.get(key)
+            if isinstance(candidates, list):
+                for candidate in candidates:
+                    if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                        return candidate
+                    found = _find_media_url(candidate, media_context=True)
+                    if found:
+                        return found
+        for key, child in value.items():
+            if key in {"cover", "dynamic_cover", "origin_cover", "avatar", "share_info"}:
+                continue
+            if key == "url" and media_context and isinstance(child, str) and child.startswith(("http://", "https://")):
+                return child
+            found = _find_media_url(
+                child,
+                media_context or key in {"video", "media", "video_info", "stream", "play_addr", "download_addr"},
+            )
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_media_url(child)
+            if found:
+                return found
+    return ""
+
+
 class TopicHunterService:
 
-    # ─── 爆款视频搜索 ────────────────────────────────────────
+    def _match_keyword(self, video: dict, keyword: str) -> bool:
+        """关键词匹配：用于热榜模式的二次筛选。"""
+        kw = (keyword or "").strip().lower()
+        if not kw:
+            return True
+        haystacks = [
+            str(video.get("title") or "").lower(),
+            str(video.get("description") or "").lower(),
+            str(video.get("author") or "").lower(),
+            " ".join(video.get("tags") or []).lower(),
+        ]
+        return any(kw in h for h in haystacks)
+
     async def search_viral_videos(
         self,
         keyword: str,
@@ -91,7 +138,8 @@ class TopicHunterService:
         min_likes: int = 0,
         days: int = 0,         # 0=不限, 3/7/30 天内
         pages: int = 1,        # 搜索翻页数
-    ) -> list[dict]:
+        video_type: str = "", # low_score_viral / high_completion / high_likes / high_follower_growth
+    ) -> tuple[list[dict], list[str]]:
         """
         跨平台搜索爆款视频
         返回按指定方式排序的统一格式视频列表
@@ -102,7 +150,7 @@ class TopicHunterService:
         # 各平台并发，但每个平台内部顺序翻页（避免并发轰炸 TikHub 导致超时/限速）
         tasks = []
         if "douyin" in platforms:
-            tasks.append(self._search_douyin(keyword, sort, limit, days=days))
+            tasks.append(self._search_douyin(keyword, sort, limit, days=days, video_type=video_type, pages=pages))
         if "xiaohongshu" in platforms:
             xhs_sort = "likes" if sort in ("likes", "comment_ratio", "collect_ratio") else "new"
             tasks.append(self._search_xhs(keyword, xhs_sort, limit))
@@ -147,15 +195,23 @@ class TopicHunterService:
         all_videos.sort(key=key_fn, reverse=True)
         return all_videos[:limit], errors
 
-    async def _search_douyin(self, keyword: str, sort: str, limit: int, days: int = 0) -> list[dict]:
+    async def _search_douyin(self, keyword: str, sort: str, limit: int, days: int = 0, video_type: str = "", pages: int = 1) -> list[dict]:
         """
-        使用 general_search_v1 接口，支持 offset 翻页。
-        按用户选择的排序方式搜索，多页翻页直到凑够 limit 条。
-        days: 时间过滤，传给 API 的 publish_time（0=不限,1=一天,7=一周）
+        抖音搜索入口：
+        - 有 video_type → 直接调对应 Billboard 接口（keyword 做二次过滤）
+        - 无 video_type → 调关键词搜索接口
         """
+        if video_type:
+            return await self._search_douyin_billboard(
+                keyword=keyword,
+                video_type=video_type,
+                limit=limit,
+                pages=pages,
+            )
+
         sort_type_map = {"likes": 1, "new": 2}
         sort_type = sort_type_map.get(sort, 1)
-        max_pages = max(2, (limit // 15) + 1)  # 每页约 17 条有效视频
+        max_pages = max(max(1, pages), (limit // 15) + 1)  # 每页约 17 条有效视频
 
         # API 支持的 publish_time: 0=不限, 1=一天内, 7=一周内, 182=半年内
         # 前端传 3/7/30，映射到 API 最近的较大范围，后端再精确过滤
@@ -201,6 +257,127 @@ class TopicHunterService:
                 break
 
         print(f"[TopicHunter] douyin total unique={len(result)}")
+        return result[:limit]
+
+    async def _search_douyin_billboard(self, keyword: str, video_type: str, limit: int, pages: int = 1) -> list[dict]:
+        """抖音热点榜检索：优先使用 Douyin-Billboard-API。"""
+        endpoint_map = {
+            "low_score_viral": tikhub.douyin_billboard_fetch_hot_total_low_fan_list,
+            "high_completion": tikhub.douyin_billboard_fetch_hot_total_high_play_list,
+            "high_likes": tikhub.douyin_billboard_fetch_hot_total_high_like_list,
+            "high_follower_growth": tikhub.douyin_billboard_fetch_hot_total_high_fan_list,
+        }
+        fetcher = endpoint_map.get(video_type, tikhub.douyin_billboard_fetch_hot_total_video_list)
+
+        result: list[dict] = []
+        seen_ids: set = set()
+        page = 1
+        page_size = min(20, max(10, limit))
+        # 前端未传 pages 时默认=1；这里按 limit 自动放大翻页，确保能拿到几十条。
+        auto_pages = max(1, (limit // 15) + 2)
+        max_pages = max(max(1, pages), auto_pages)
+
+        while len(result) < limit and page <= max_pages:
+            try:
+                raw = await fetcher(page=page, page_size=page_size)
+            except Exception as exc:
+                print(f"[TopicHunter] douyin billboard page={page} error: {type(exc).__name__}: {exc}")
+                break
+
+            data = raw.get("data", {}) if isinstance(raw, dict) else {}
+            items = []
+            page_meta = {}
+            if isinstance(data, dict):
+                # 新版返回通常是 data.data.objs
+                nested = data.get("data")
+                if isinstance(nested, dict):
+                    page_meta = nested.get("page") or {}
+                    objs = nested.get("objs")
+                    if isinstance(objs, list):
+                        items = objs
+                elif isinstance(nested, list):
+                    items = nested
+                for key in ("list", "data", "items", "aweme_list", "video_list"):
+                    val = data.get(key)
+                    if isinstance(val, list):
+                        items = val
+                        break
+            elif isinstance(data, list):
+                items = data
+
+            if not items:
+                break
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("item_id"):
+                    video_id = item.get("item_id", "")
+                    like_count = int(item.get("like_cnt") or 0)
+                    play_count = int(item.get("play_cnt") or 0)
+                    collect_count = int(item.get("collect_cnt") or 0)
+                    comment_count = int(item.get("comment_cnt") or 0)
+                    if item.get("like_rate") is not None:
+                        try:
+                            like_play_ratio = float(item.get("like_rate") or 0)
+                        except (TypeError, ValueError):
+                            like_play_ratio = round((like_count / play_count), 6) if play_count > 0 else None
+                    else:
+                        like_play_ratio = round((like_count / play_count), 6) if play_count > 0 else None
+
+                    parsed = {
+                        "platform": "douyin",
+                        "video_id": video_id,
+                        "title": item.get("item_title", ""),
+                        "description": item.get("item_title", ""),
+                        "cover_url": item.get("item_cover_url", ""),
+                        "video_url": f"https://www.douyin.com/video/{video_id}" if video_id else "",
+                        "like_count": like_count,
+                        "comment_count": comment_count,
+                        "share_count": int(item.get("share_cnt") or 0),
+                        "play_count": play_count,
+                        "collect_count": collect_count,
+                        "duration": int(item.get("item_duration") or 0),
+                        "author": item.get("nick_name", ""),
+                        "author_id": item.get("author_id", ""),
+                        "author_unique_id": item.get("author_unique_id", ""),
+                        "author_avatar": item.get("avatar_url", ""),
+                        "author_follower_count": int(item.get("fans_cnt") or 0),
+                        "author_bio": "",
+                        "author_url": item.get("author_url", ""),
+                        "create_time": int(item.get("publish_time") or 0),
+                        "like_play_ratio": like_play_ratio,
+                        "comment_play_ratio": round((comment_count / play_count), 6) if play_count > 0 else 0,
+                        "collect_play_ratio": round((collect_count / play_count), 6) if play_count > 0 else 0,
+                        "tags": [],
+                    }
+                else:
+                    aweme = item.get("aweme_info") or item.get("aweme") or item.get("item") or item
+                    if not isinstance(aweme, dict):
+                        continue
+                    parsed = tikhub.parse_douyin_video(aweme)
+
+                vid = parsed.get("video_id")
+                if not vid or vid in seen_ids:
+                    continue
+                if not self._match_keyword(parsed, keyword):
+                    continue
+                seen_ids.add(vid)
+                result.append(parsed)
+                if len(result) >= limit:
+                    break
+
+            page += 1
+            # 不再用 len(items) < page_size 判定是否结束（该接口常见固定 19 条/页）
+            if isinstance(page_meta, dict):
+                total = int(page_meta.get("total") or 0)
+                current = int(page_meta.get("page") or (page - 1))
+                if total > 0 and current * page_size >= total:
+                    break
+            elif not items:
+                break
+
+        print(f"[TopicHunter] douyin billboard total unique={len(result)} type={video_type or 'default'} keyword={keyword}")
         return result[:limit]
 
     async def _search_xhs(self, keyword: str, sort: str, limit: int) -> list[dict]:
@@ -304,6 +481,7 @@ class TopicHunterService:
                     "script": transcript,
                     "caption": v.get("desc", ""),   # 博主手动输入的文案描述
                     "share_url": (v.get("share_info") or {}).get("share_url", ""),
+                    "video_url": play_url,
                 }
             except Exception as e:
                 print(f"[TopicHunter] douyin detail error: {e}")
@@ -328,6 +506,24 @@ class TopicHunterService:
 
         elif platform == "xiaohongshu":
             try:
+                # 列表中通常只有 explore 网页地址；详情接口里才可能包含视频直链。
+                raw_detail = await tikhub.xhs_get_note_detail(video_id)
+                detail_root = raw_detail.get("data", {}) or {}
+                note_root = detail_root.get("note") or detail_root.get("note_card") or {}
+                detail_data["caption"] = (
+                    detail_root.get("desc") or detail_root.get("description")
+                    or note_root.get("desc") or note_root.get("description") or ""
+                )
+                detail_data["video_url"] = _find_media_url(detail_root)
+                if detail_data["video_url"]:
+                    from services.transcribe import transcribe_service
+                    detail_data["script"] = await transcribe_service.transcribe_from_url(
+                        detail_data["video_url"], video_id
+                    )
+            except Exception as e:
+                print(f"[TopicHunter] xhs detail/transcribe error: {e}")
+
+            try:
                 raw = await tikhub.xhs_get_note_comments(video_id)
                 data = raw.get("data", {})
                 raw_comments = data.get("comments") or []
@@ -347,8 +543,90 @@ class TopicHunterService:
             "script": detail_data.get("script", ""),
             "caption": detail_data.get("caption", ""),
             "share_url": detail_data.get("share_url", ""),
+            "video_url": detail_data.get("video_url", ""),
             "top_comments": comments_data[:comment_count],
         }
+
+    # ─── 通过链接添加单个视频 ────────────────────────────────
+    async def resolve_video_url(self, url: str) -> tuple[str, str]:
+        """
+        根据视频链接识别平台 + 提取 video_id。
+        支持：
+          - 抖音短链 v.douyin.com/xxx  、iesdouyin.com/share/video/123
+          - 抖音长链 www.douyin.com/video/123 、douyin.com/note/123
+          - 小红书短链 xhslink.com/xxx
+          - 小红书长链 www.xiaohongshu.com/explore/xxx / /discovery/item/xxx
+        返回 (platform, video_id)
+        """
+        import re, httpx
+        raw = (url or "").strip()
+        if not raw:
+            raise ValueError("链接为空")
+
+        # 从中文分享文本里提取第一个 http(s) 链接
+        m = re.search(r"https?://[^\s]+", raw)
+        if m:
+            raw = m.group(0).rstrip("，。,。 ；;")
+
+        # 跟随短链重定向
+        resolved = raw
+        short_hosts = ("v.douyin.com", "xhslink.com", "v.xhs.cn")
+        if any(h in raw for h in short_hosts):
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as c:
+                    r = await c.get(raw, headers={
+                        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15",
+                    })
+                    resolved = str(r.url)
+            except Exception:
+                resolved = raw
+
+        # 抖音 aweme_id
+        patterns = [
+            (r"douyin\.com/video/(\d+)", "douyin"),
+            (r"douyin\.com/note/(\d+)", "douyin"),
+            (r"iesdouyin\.com/share/video/(\d+)", "douyin"),
+            (r"douyin\.com/share/video/(\d+)", "douyin"),
+            (r"modal_id=(\d+)", "douyin"),
+            # 小红书 note_id（24 位十六进制）
+            (r"xiaohongshu\.com/explore/([0-9a-fA-F]+)", "xiaohongshu"),
+            (r"xiaohongshu\.com/discovery/item/([0-9a-fA-F]+)", "xiaohongshu"),
+        ]
+        for pat, plat in patterns:
+            mm = re.search(pat, resolved)
+            if mm:
+                return plat, mm.group(1)
+
+        raise ValueError("无法识别的视频链接，目前支持抖音 / 小红书")
+
+    async def fetch_topic_from_url(self, url: str) -> dict:
+        """
+        通过视频链接获取标准化的选题字段（不入库）。
+        返回字段与 parse_douyin_video / parse_xhs_note 一致，可直接用于构建 Topic。
+        """
+        platform, video_id = await self.resolve_video_url(url)
+
+        if platform == "douyin":
+            raw = await tikhub.douyin_get_video_detail(video_id)
+            data = raw.get("data", {})
+            v = data.get("aweme_detail") or data
+            if not v or not (v.get("aweme_id") or v.get("desc")):
+                raise ValueError("未能从抖音获取到视频详情")
+            return tikhub.parse_douyin_video(v)
+
+        if platform == "xiaohongshu":
+            raw = await tikhub.xhs_get_note_detail(video_id)
+            data = raw.get("data", {})
+            # web_v3 返回结构差异较大，兼容几种可能的路径
+            note = data.get("note") or data.get("items", [{}])[0] if isinstance(data.get("items"), list) else data
+            if not note:
+                raise ValueError("未能从小红书获取到笔记详情")
+            # 补一下 id 字段（有些返回体用 note_id）
+            if not (note.get("id") or note.get("noteId") or note.get("note_id")):
+                note["noteId"] = video_id
+            return tikhub.parse_xhs_note(note)
+
+        raise ValueError(f"暂不支持的平台：{platform}")
 
     # ─── 博主关键词发现 ──────────────────────────────────────
     async def discover_creators_by_keyword(

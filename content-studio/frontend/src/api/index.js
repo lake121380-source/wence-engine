@@ -45,6 +45,8 @@ export const authApi = {
   // 邮箱登录/注册
   login: (data) => api.post('/auth/login', data),
   register: (data) => api.post('/auth/register', data),
+  config: () => api.get('/auth/config'),
+  sendRegisterCode: (data) => api.post('/auth/email/send-register-code', data),
   // Google / GitHub OAuth
   googleUrl: (params) => api.get('/auth/google/url', { params }),
   googleCallback: (data) => api.post('/auth/google/callback', data),

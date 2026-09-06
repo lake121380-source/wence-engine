@@ -8,8 +8,12 @@ import os
 import hashlib
 from pathlib import Path
 from sqlalchemy.orm import Session
-import chromadb
-from chromadb.utils import embedding_functions
+try:
+    import chromadb
+    from chromadb.utils import embedding_functions
+except Exception:
+    chromadb = None
+    embedding_functions = None
 from models import Creator, CreatorVideo, Document, StyleTemplate
 from config import settings
 
@@ -28,6 +32,8 @@ class KnowledgeService:
     def _ensure_initialized(self):
         if self._initialized:
             return
+        if chromadb is None or embedding_functions is None:
+            raise RuntimeError("chromadb is not installed")
         self.client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
         self.ef = embedding_functions.DefaultEmbeddingFunction()
         self.industry_col = self.client.get_or_create_collection(
@@ -53,23 +59,38 @@ class KnowledgeService:
         self._initialized = True
 
     # ─── 博主视频索引 ─────────────────────────────────────────
-    async def index_creator_videos(self, db: Session, creator_id: int):
+    def index_creator_videos(self, db: Session, creator_id: int):
         """将博主未索引的视频入向量库"""
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return 0
         creator = db.query(Creator).filter(Creator.id == creator_id).first()
+        from sqlalchemy import or_ as _or
         videos = db.query(CreatorVideo).filter(
             CreatorVideo.creator_id == creator_id,
             CreatorVideo.indexed == False,
-            CreatorVideo.description != None,
-            CreatorVideo.description != ""
+            _or(
+                _or(CreatorVideo.script != None, CreatorVideo.script != ""),
+                _or(CreatorVideo.description != None, CreatorVideo.description != ""),
+            )
         ).all()
+        # 过滤掉 script 和 description 都为空的记录
+        videos = [v for v in videos if (v.script or "").strip() or (v.description or "").strip()]
 
         if not videos:
             return 0
 
         docs, metas, ids = [], [], []
         for v in videos:
-            text = f"{v.title}\n{v.description}"
+            # 优先使用语音转录口播内容，其次用发布描述
+            script = (v.script or "").strip()
+            description = (v.description or "").strip()
+            if script:
+                # 口播内容 + 标题，是博主实际说的话，风格最真实
+                text = f"{v.title or ''}\n口播内容：{script}"
+            else:
+                text = f"{v.title or ''}\n{description}"
             if v.tags:
                 text += f"\n标签：{' '.join(v.tags)}"
             doc_id = f"video_{v.id}"
@@ -102,51 +123,31 @@ class KnowledgeService:
         return len(videos)
 
     # ─── 产品文档处理 ─────────────────────────────────────────
-    async def process_document(self, db: Session, doc_id: int):
+    def process_document(self, db: Session, doc_id: int):
         """解析文档文本并入向量库"""
-        self._ensure_initialized()
         doc = db.query(Document).filter(Document.id == doc_id).first()
         if not doc or not doc.file_path:
             return
 
         text = self._extract_text(doc.file_path, doc.file_type)
-        doc.content = text
-        chunks = self._chunk_text(text)
-        doc.chunk_count = len(chunks)
+        return self.process_text(db, doc_id, text)
 
-        chunk_docs, chunk_metas, chunk_ids = [], [], []
-        for i, chunk in enumerate(chunks):
-            chunk_docs.append(chunk)
-            chunk_metas.append({
-                "doc_id": str(doc_id),
-                "doc_name": doc.name,
-                "chunk_index": i,
-                "type": "product_doc",
-                "tenant_id": str(doc.tenant_id or 0),
-            })
-            chunk_ids.append(f"doc_{doc_id}_chunk_{i}")
-
-        if chunk_docs:
-            self.product_col.upsert(
-                documents=chunk_docs,
-                metadatas=chunk_metas,
-                ids=chunk_ids
-            )
-
-        doc.indexed = True
-        db.commit()
-        return len(chunks)
-
-    async def process_text(self, db: Session, doc_id: int, text: str):
-        """直接将文本内容入向量库（来自博主视频文案、爆款选题等）"""
-        self._ensure_initialized()
+    def process_text(self, db: Session, doc_id: int, text: str):
+        """Persist extracted text even when the optional vector index is unavailable."""
         doc = db.query(Document).filter(Document.id == doc_id).first()
-        if not doc or not text.strip():
+        if not doc:
             return 0
-
         doc.content = text
         chunks = self._chunk_text(text)
         doc.chunk_count = len(chunks)
+        doc.indexed = False
+        db.commit()
+        if not chunks:
+            return 0
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return 0
 
         chunk_docs, chunk_metas, chunk_ids = [], [], []
         for i, chunk in enumerate(chunks):
@@ -172,9 +173,12 @@ class KnowledgeService:
         return len(chunks)
 
     # ─── 风格模版索引 ─────────────────────────────────────────
-    async def index_style_template(self, db: Session, template_id: int):
+    def index_style_template(self, db: Session, template_id: int):
         """将风格模版入向量库"""
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return
         tmpl = db.query(StyleTemplate).filter(StyleTemplate.id == template_id).first()
         if not tmpl:
             return
@@ -203,7 +207,10 @@ class KnowledgeService:
         - creator_id_list: 指定多个博主（当前租户订阅的所有博主）
         - tenant_id: 旧参数，保留兼容，共享博主模型下通常不用
         """
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return []
         count = self.industry_col.count()
         if count == 0:
             return []
@@ -229,15 +236,26 @@ class KnowledgeService:
         except Exception:
             return []
 
-    def retrieve_product(self, query: str, n: int = 5, tenant_id: int = None) -> list[dict]:
-        self._ensure_initialized()
+    def retrieve_product(self, query: str, n: int = 5, tenant_id: int = None, doc_ids: list[int] = None) -> list[dict]:
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return []
         try:
             count = self.product_col.count()
             if count == 0:
                 return []
             if not tenant_id:
                 return []  # 必须指定租户，防止跨租户泄漏
-            where = {"tenant_id": str(tenant_id)}
+            if doc_ids:
+                # 用户显式 @ 了具体文档，只在这些文档中检索
+                doc_id_strs = [str(d) for d in doc_ids]
+                if len(doc_id_strs) == 1:
+                    where = {"$and": [{"tenant_id": str(tenant_id)}, {"doc_id": doc_id_strs[0]}]}
+                else:
+                    where = {"$and": [{"tenant_id": str(tenant_id)}, {"doc_id": {"$in": doc_id_strs}}]}
+            else:
+                where = {"tenant_id": str(tenant_id)}
             results = self.product_col.query(
                 query_texts=[query],
                 n_results=min(n, count),
@@ -248,7 +266,10 @@ class KnowledgeService:
             return []
 
     def retrieve_style(self, query: str, n: int = 3, tenant_id: int = None) -> list[dict]:
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return []
         try:
             count = self.style_col.count()
             if count == 0:
@@ -268,7 +289,10 @@ class KnowledgeService:
     # ─── 运营者观点 ──────────────────────────────────────────
     def index_viewpoint(self, viewpoint_id: int, title: str, content: str, category: str, tags: str, tenant_id: int = 0):
         """将运营者观点入向量库"""
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return
         text = f"【{category}】{title}\n{content}"
         self.viewpoint_col.upsert(
             documents=[text],
@@ -284,7 +308,10 @@ class KnowledgeService:
 
     def delete_viewpoint(self, viewpoint_id: int):
         """从向量库删除观点"""
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return
         try:
             self.viewpoint_col.delete(ids=[f"viewpoint_{viewpoint_id}"])
         except Exception:
@@ -292,7 +319,10 @@ class KnowledgeService:
 
     def retrieve_viewpoints(self, query: str, n: int = 5, tenant_id: int = None) -> list[dict]:
         """检索相关运营者观点"""
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return []
         try:
             count = self.viewpoint_col.count()
             if count == 0:
@@ -310,7 +340,15 @@ class KnowledgeService:
             return []
 
     def get_stats(self) -> dict:
-        self._ensure_initialized()
+        try:
+            self._ensure_initialized()
+        except Exception:
+            return {
+                "industry_docs": 0,
+                "product_docs": 0,
+                "style_docs": 0,
+                "viewpoint_docs": 0,
+            }
         return {
             "industry_docs": self.industry_col.count(),
             "product_docs": self.product_col.count(),
@@ -323,8 +361,8 @@ class KnowledgeService:
         try:
             if file_type == "pdf":
                 import fitz
-                doc = fitz.open(file_path)
-                return "\n".join(page.get_text() for page in doc)
+                with fitz.open(file_path) as doc:
+                    return "\n".join(page.get_text() for page in doc)
             elif file_type in ("docx", "doc"):
                 from docx import Document as DocxDoc
                 doc = DocxDoc(file_path)
@@ -350,10 +388,12 @@ class KnowledgeService:
 
     def _format_results(self, results: dict) -> list[dict]:
         out = []
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
-        for doc, meta, dist in zip(docs, metas, distances):
+        docs = results.get("documents", [])
+        metas = results.get("metadatas", [])
+        distances = results.get("distances", [])
+        if not docs or not metas or not distances:
+            return []
+        for doc, meta, dist in zip(docs[0], metas[0], distances[0]):
             out.append({"text": doc, "metadata": meta, "score": round(1 - dist, 4)})
         return out
 

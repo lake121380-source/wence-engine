@@ -81,10 +81,10 @@ class TranscribeService:
         import ipaddress
         try:
             ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_reserved:
-                raise ValueError("不允许访问内网地址")
         except ValueError:
-            pass
+            ip = None
+        if ip is not None and (ip.is_private or ip.is_loopback or ip.is_reserved):
+            raise ValueError("不允许访问内网地址")
         allowed = any(hostname == d or hostname.endswith("." + d) for d in self.ALLOWED_DOMAINS)
         if not allowed:
             raise ValueError(f"不允许的视频域名: {hostname}")
@@ -150,7 +150,7 @@ class TranscribeService:
         if not video_url:
             return ""
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # ── 1. Deepgram whisper-medium（主方案，零下载，中文最准）──
         if self.deepgram_key:

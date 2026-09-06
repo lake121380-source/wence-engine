@@ -91,6 +91,16 @@
             style="margin-bottom: 16px"
             @keyup.enter="handleEmailSubmit"
           />
+          <div v-if="isRegister && registerCodeRequired" style="display: flex; gap: 8px; margin-bottom: 16px">
+            <n-input v-model:value="form.verify_code" placeholder="邮箱验证码" maxlength="6" />
+            <n-button
+              :loading="codeLoading"
+              :disabled="codeLoading || codeCountdown > 0"
+              @click="sendRegisterCode"
+            >
+              {{ codeCountdown > 0 ? `${codeCountdown}s 后重发` : '发送验证码' }}
+            </n-button>
+          </div>
           <n-button
             type="primary"
             block
@@ -126,7 +136,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useAuthStore } from '../stores/auth.js'
@@ -144,7 +154,53 @@ const authStore = useAuthStore()
 const isRegister = ref(false)
 const emailLoading = ref(false)
 const oauthLoading = ref(false)
-const form = ref({ email: '', password: '', nickname: '' })
+const codeLoading = ref(false)
+const codeCountdown = ref(0)
+const registerCodeRequired = ref(false)
+const form = ref({ email: '', password: '', nickname: '', verify_code: '' })
+let codeTimer = null
+
+function clearCodeTimer() {
+  if (codeTimer !== null) {
+    clearInterval(codeTimer)
+    codeTimer = null
+  }
+}
+
+function startCodeCountdown(seconds = 60) {
+  clearCodeTimer()
+  codeCountdown.value = seconds
+  codeTimer = setInterval(() => {
+    if (codeCountdown.value <= 1) {
+      codeCountdown.value = 0
+      clearCodeTimer()
+      return
+    }
+    codeCountdown.value -= 1
+  }, 1000)
+}
+
+async function sendRegisterCode() {
+  const email = form.value.email.trim()
+  if (!email || !email.includes('@')) {
+    message.warning('请输入有效邮箱')
+    return
+  }
+  if (codeLoading.value || codeCountdown.value > 0) return
+
+  codeLoading.value = true
+  try {
+    const { data } = await authApi.sendRegisterCode({ email, nickname: form.value.nickname })
+    message.success(data.message || '验证码已发送')
+    startCodeCountdown()
+  } catch (e) {
+    message.error(e.response?.data?.detail || '验证码发送失败')
+  } finally {
+    codeLoading.value = false
+  }
+}
+
+onBeforeUnmount(clearCodeTimer)
 
 
 
@@ -179,6 +235,7 @@ async function handleEmailSubmit() {
         email,
         password: form.value.password,
         nickname: form.value.nickname,
+        verify_code: form.value.verify_code,
       })
       message.success('注册成功')
     } else {
@@ -262,6 +319,10 @@ function _handleLoginSuccess(data) {
 }
 
 onMounted(async () => {
+  try {
+    const { data } = await authApi.config()
+    registerCodeRequired.value = data.register_code_required
+  } catch { message.error('无法读取注册配置，请稍后刷新') }
   if (authStore.isAuthenticated) {
     router.replace('/generate')
     return

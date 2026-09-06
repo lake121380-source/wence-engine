@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from typing import Optional
 
@@ -16,6 +17,39 @@ router = APIRouter()
 
 UPLOAD_DIR = "./uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _build_ai_summary(content: str) -> str:
+    text = (content or "").strip()
+    if not text:
+        return ""
+
+    lines = [x.strip(" -•\t") for x in text.replace("\r", "").split("\n") if x.strip()]
+    points = []
+    for line in lines:
+        if len(line) < 8:
+            continue
+        short = line[:90]
+        if short not in points:
+            points.append(short)
+        if len(points) >= 5:
+            break
+
+    if len(points) < 3:
+        chunks = [x.strip() for x in re.split(r"[。！？!?]", text) if x.strip()]
+        for c in chunks:
+            if len(c) < 8:
+                continue
+            short = c[:90]
+            if short not in points:
+                points.append(short)
+            if len(points) >= 5:
+                break
+
+    if not points:
+        points = [text[:90]]
+
+    return "\n".join([f"• {p}" for p in points[:5]])
 
 
 @router.get("/documents")
@@ -44,6 +78,7 @@ def list_documents(
             "folder_name": d.folder_name,
             "source_type": d.source_type,
             "source_ref": d.source_ref,
+            "ai_summary": d.ai_summary,
             "content_preview": (d.content or "")[:300] if d.content else None,
             "created_at": d.created_at,
         }
@@ -145,6 +180,7 @@ def get_document(
         "folder_name": doc.folder_name,
         "source_type": doc.source_type,
         "source_ref": doc.source_ref,
+        "ai_summary": doc.ai_summary,
         "content": doc.content or "",
         "created_at": doc.created_at,
     }
@@ -240,6 +276,9 @@ def get_document_analysis(
     }
 
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
 @router.post("/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
@@ -248,14 +287,27 @@ async def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    ext = file.filename.split(".")[-1].lower()
-    if ext not in ("pdf", "docx", "doc", "txt"):
-        raise HTTPException(status_code=400, detail="仅支持 PDF / Word / TXT 格式")
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in ("pdf", "docx", "txt"):
+        raise HTTPException(status_code=400, detail="仅支持 PDF / DOCX / TXT；旧 DOC 请先另存为 DOCX")
 
     safe_filename = f"{uuid.uuid4().hex}.{ext}"
     save_path = os.path.join(UPLOAD_DIR, safe_filename)
+
+    # 逐块读取并检查文件大小，防止内存耗尽 DoS
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)  # 64KB per read
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"文件不能超过 {MAX_UPLOAD_BYTES // 1024 // 1024} MB")
+        chunks.append(chunk)
+    content = b"".join(chunks)
+
     async with aiofiles.open(save_path, "wb") as out_file:
-        content = await file.read()
         await out_file.write(content)
 
     doc = Document(
@@ -271,8 +323,12 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    chunks = await knowledge_service.process_document(db, doc.id)
-    return {"id": doc.id, "name": doc.name, "chunks": chunks}
+    chunks = knowledge_service.process_document(db, doc.id)
+    db.refresh(doc)
+    doc.ai_summary = _build_ai_summary(doc.content or "")
+    db.commit()
+    return {"id": doc.id, "name": doc.name, "chunks": chunks, "indexed": doc.indexed,
+            "text_extracted": bool(doc.content), "ai_summary": doc.ai_summary}
 
 
 @router.delete("/documents/{doc_id}")
@@ -358,5 +414,8 @@ async def add_text_document(
     db.commit()
     db.refresh(doc)
 
-    chunks = await knowledge_service.process_text(db, doc.id, req.content)
-    return {"id": doc.id, "name": doc.name, "chunks": chunks}
+    chunks = knowledge_service.process_text(db, doc.id, req.content)
+    doc.ai_summary = _build_ai_summary(req.content)
+    db.commit()
+    return {"id": doc.id, "name": doc.name, "chunks": chunks, "indexed": doc.indexed,
+            "text_extracted": bool(doc.content), "ai_summary": doc.ai_summary}
