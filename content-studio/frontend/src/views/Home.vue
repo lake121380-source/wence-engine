@@ -27,7 +27,6 @@
           <a href="#matrix-modules" class="nav-item" @click.prevent="scrollToSection('matrix-modules')">功能矩阵</a>
           <a href="#social-proof" class="nav-item" @click.prevent="scrollToSection('social-proof')">创作者口碑</a>
           <a href="#faq" class="nav-item" @click.prevent="scrollToSection('faq')">常见问题</a>
-          <a href="/admin/" target="_blank" class="nav-item admin-tag">管理后台</a>
         </nav>
 
         <!-- 头部操作区 -->
@@ -1092,7 +1091,6 @@
 
           <div class="footer-column">
             <div class="col-heading">企业与管理</div>
-            <a href="/admin/" target="_blank">管理后台登录</a>
             <a @click="navigateTo('/settings')">企业空间设置</a>
             <a @click="navigateTo('/login')">用户登录 / 注册</a>
           </div>
@@ -2059,11 +2057,6 @@ const filteredFaqList = computed(() => {
 
 .nav-item:hover::after {
   width: 100%;
-}
-
-.nav-item.admin-tag {
-  color: #4f46e5;
-  font-weight: 600;
 }
 
 .header-actions {

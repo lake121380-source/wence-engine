@@ -32,7 +32,13 @@ async function start() {
     for (const dir of [client, admin]) {
       if (!fs.existsSync(path.join(dir, 'index.html'))) throw new Error('请先执行 npm run build');
     }
-    app.get('/admin', (_req, res) => res.redirect('/admin/'));
+    // Express treats `/admin` and `/admin/` as the same route by default.
+    // Guard the redirect so `/admin/` can fall through to the static index
+    // instead of redirecting to itself forever.
+    app.get('/admin', (req, res, next) => {
+      if (req.path === '/admin') return res.redirect('/admin/');
+      next();
+    });
     app.use('/admin', express.static(admin));
     app.get('/admin/*', (_req, res) => res.sendFile(path.join(admin, 'index.html')));
     app.use(express.static(client));
