@@ -40,6 +40,43 @@ class _FakeAsyncClient:
 
 
 class TikHubRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_douyin_user_search_uses_current_post_endpoint(self):
+        calls = []
+        client = TikHubClient()
+
+        async def fake_post(endpoint, json_data=None):
+            calls.append((endpoint, json_data))
+            return {"data": {"user_list": []}}
+
+        with patch.object(client, "_post", side_effect=fake_post):
+            result = await client.douyin_search_users("测试", count=10)
+
+        self.assertEqual(result, {"data": {"user_list": []}})
+        self.assertEqual(calls, [(
+            "/api/v1/douyin/search/fetch_user_search",
+            {
+                "keyword": "测试",
+                "cursor": 0,
+                "douyin_user_fans": "",
+                "douyin_user_type": "",
+                "search_id": "",
+            },
+        )])
+
+    async def test_douyin_sec_uid_profile_uses_current_endpoint(self):
+        with patch.object(
+            client := TikHubClient(),
+            "_get",
+            return_value={"data": {"user_info": {}}},
+        ) as get:
+            result = await client.douyin_get_user_by_sec_uid("sec-uid")
+
+        self.assertEqual(result, {"data": {"user_info": {}}})
+        get.assert_awaited_once_with(
+            "/api/v1/douyin/web/handler_user_profile",
+            {"sec_user_id": "sec-uid"},
+        )
+
     async def test_ssl_eof_retries_with_a_fresh_client(self):
         outcomes = [ssl.SSLError("UNEXPECTED_EOF_WHILE_READING"), _Response()]
         client = TikHubClient()

@@ -172,6 +172,18 @@ class TikHubClient:
             {"unique_id": unique_id}
         )
 
+    async def douyin_get_user_by_sec_uid(self, sec_user_id: str) -> dict:
+        """通过 sec_user_id 获取用户信息。
+
+        TikHub 已将旧的 ``web/fetch_user_profile`` 路径替换为
+        ``web/handler_user_profile``；这里集中封装当前路径，避免调用方
+        各自拼接已经失效的地址。
+        """
+        return await self._get(
+            "/api/v1/douyin/web/handler_user_profile",
+            {"sec_user_id": sec_user_id}
+        )
+
     async def douyin_get_user_videos(self, sec_user_id: str, max_cursor: int = 0) -> dict:
         """获取用户主页作品列表（抖音 App V3 接口）。
 
@@ -307,10 +319,21 @@ class TikHubClient:
         )
 
     async def douyin_search_users(self, keyword: str, count: int = 20) -> dict:
-        """抖音关键词搜索博主（用于发现行业头部博主）"""
-        return await self._get(
-            "/api/v1/douyin/web/fetch_user_search_result",
-            {"keyword": keyword, "count": count, "offset": 0}
+        """抖音关键词搜索博主（用于发现行业头部博主）。
+
+        旧版 ``web/fetch_user_search_result`` 已从 TikHub OpenAPI 中移除，
+        会直接返回 404。当前接口是搜索域的 POST 接口，响应仍包含
+        ``data.user_list``，因此上层解析无需改变。
+        """
+        return await self._post(
+            "/api/v1/douyin/search/fetch_user_search",
+            {
+                "keyword": keyword,
+                "cursor": 0,
+                "douyin_user_fans": "",
+                "douyin_user_type": "",
+                "search_id": "",
+            }
         )
 
     # ─── 抖音热点榜（Douyin-Billboard-API）────────────────────

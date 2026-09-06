@@ -415,7 +415,7 @@ async def batch_add_creators(
 
     for sec_uid in creator_ids_to_add:
         try:
-            raw = await th._get("/api/v1/douyin/web/fetch_user_profile", {"sec_user_id": sec_uid})
+            raw = await th.douyin_get_user_by_sec_uid(sec_uid)
             profile = th.parse_douyin_user(raw)
             existing_creator = db.query(Creator).filter(
                 Creator.platform == "douyin",
