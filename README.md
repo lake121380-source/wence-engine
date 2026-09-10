@@ -44,7 +44,7 @@
 - 租户成员管理与邀请
 
 ### 9. 订阅付费
-- 基于 YunGouOS 聚合支付（微信 / 支付宝 / 一码付）
+- 基于 GGGUA 易支付 V1（微信 / 支付宝）
 - 试用期 + 月度订阅，支付回调自动开通
 
 ### 10. 平台管理后台
@@ -110,7 +110,7 @@ content-studio/
 
 ```bash
 cd content-studio/backend
-cp .env.example .env
+cp ../../.env.example .env
 # 编辑 .env，填入真实的 API Key（见下方「环境变量说明」）
 ```
 
@@ -149,7 +149,7 @@ cd content-studio
 docker compose up --build -d
 ```
 
-Caddy 监听 80/443，按 `Caddyfile` 将域名路由到各服务（需提前将域名解析到服务器，并修改 `Caddyfile` 中的 `wenceai.xyz` 为你的域名）。
+Caddy 监听 80/443，按 `Caddyfile` 将 `wence.tongzhuo.ink` 路由到各服务；如更换域名，请同步修改 Caddyfile、CORS 和 `GGGUA_NOTIFY_URL`。
 
 ---
 
@@ -168,13 +168,37 @@ Caddy 监听 80/443，按 `Caddyfile` 将域名路由到各服务（需提前将
 | `DATABASE_URL` | 数据库连接串 | `sqlite:///./content_studio.db` |
 | `CHROMA_PERSIST_DIR` | ChromaDB 向量库目录 | `./chroma_db` |
 | `WECHAT_APPID` / `WECHAT_APPSECRET` / `WECHAT_TOKEN` | 公众号凭证（登录/消息） | 空 |
-| `YUNGOUOS_*` | YunGouOS 聚合支付商户参数 | 空 |
+| `PAYMENT_PROVIDER` | 支付适配器 | `gggua` |
+| `GGGUA_PID` | GGGUA 易支付商户 ID | 空 |
+| `GGGUA_KEY` | GGGUA 易支付 V1 MD5 商户密钥（仅服务器环境变量） | 空 |
+| `GGGUA_BASE_URL` | GGGUA API 基地址 | `https://pay.gggua.com` |
+| `GGGUA_NOTIFY_URL` | 异步 GET 回调地址；生产应为 `https://wence.tongzhuo.ink/api/payment/notify` 这类公网 HTTPS URL | 空 |
+| `GGGUA_RETURN_URL` | 页面跳转回调地址（可选） | 空 |
+| `GGGUA_CLIENT_IP` | 可选的固定下单客户端 IP；为空时使用请求地址 | 空 |
+| `PAYMENT_TRUSTED_PROXY_IPS` | 允许读取 `X-Forwarded-For` 的反向代理 IP（逗号分隔） | `127.0.0.1,::1` |
+| `PAYMENT_HTTP_TIMEOUT_SECONDS` | 支付上游请求超时（秒） | `15` |
+| `PAYMENT_ORDER_EXPIRE_MINUTES` | 本地订单有效期（分钟） | `15` |
+| `PAYMENT_QUERY_FALLBACK` | 回调延迟时是否用 GGGUA 查单兜底 | `true` |
+| `PAYMENT_QUERY_INTERVAL_SECONDS` | 同一订单两次上游查单的最短间隔 | `10` |
+| `PAYMENT_DEV_MODE` | 本地模拟支付开关；必须与 `DEBUG=true` 同时满足才允许模拟支付 | `false` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth 凭证 | 空 |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth 凭证 | 空 |
 | `JWT_SECRET` | JWT 签名密钥（**≥32 字符**，生产必改） | 占位值 |
 | `JWT_EXPIRE_HOURS` | Token 有效期（小时） | `168` |
 | `FRONTEND_URL` | 前端地址（OAuth 回调用） | `http://localhost:5173` |
 | `DEBUG` | 调试模式 | `false` |
+
+### 支付上线检查
+
+支付商户进件、通道开通和密钥配置完成前，支付接口会返回 `503`，这是保护性行为，不代表前端代码故障。正式开通时按以下顺序验收：
+
+1. 只在服务器环境变量中填写 `GGGUA_PID` 和 `GGGUA_KEY`，不要把密钥提交到 Git、镜像或日志。
+2. 将 `GGGUA_NOTIFY_URL` 配置为公网可访问的 HTTPS 地址，且不附带查询参数；当前生产域名对应 `/api/payment/notify`。Docker/Caddy 部署同时建议填写服务器公网出口 `GGGUA_CLIENT_IP`，或把实际代理地址精确加入 `PAYMENT_TRUSTED_PROXY_IPS`。
+3. 从公网请求 `POST /api/payment/orders` 创建一笔最小金额订单，确认返回二维码并能轮询到 `paid`。
+4. 在支付服务商后台确认异步通知成功；重复通知、金额不一致通知都不能重复激活订阅。
+5. 生产环境保持 `DEBUG=false`、`PAYMENT_DEV_MODE=false`，并在验收后删除任何临时测试订单。查单 URL 按 GGGUA 协议携带密钥，应用日志已做查询参数脱敏，仍不要把完整请求 URL复制到外部日志。
+
+当前接入的是 GGGUA 易支付 V1 协议：下单使用 `POST /mapi.php` 表单，回调使用 `GET /api/payment/notify`，签名为 MD5（参数按 ASCII 排序、排除空值/sign/sign_type、末尾直接拼接 KEY）。服务商返回 `qrcode` 时它是支付 URI，后端会转换为本地二维码图片；`payurl` 则由前端打开支付页面。退款 API 需要在商户后台单独开启，暂不作为默认能力。
 
 ---
 

@@ -1,5 +1,7 @@
 """PromptBuilder: 汇总上下文并输出 system/user prompt 及结构化 debug 信息。"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from services.prompts import SYSTEM_PROMPT, PLATFORM_LABELS

@@ -4,6 +4,8 @@
 - 调用 Claude API
 - 解析结构化输出
 """
+from __future__ import annotations
+
 import json, asyncio, re
 from typing import AsyncGenerator
 

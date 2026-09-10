@@ -46,6 +46,13 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# ---- 部署归档与本地测试产物 ----
+# deploy-*.tar.gz 里曾打包进 app/backend/content_studio.db（生产库，含用户数据），
+# 一律不入版本控制。
+deploy-*/
+*.tar.gz
+local-payment-test*
 AGENTS.md
 
 runtime-data/

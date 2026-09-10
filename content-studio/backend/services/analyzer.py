@@ -3,6 +3,8 @@
 - 博主情报卡（四维度AI分析）
 - 爆款视频互动比分析引擎
 """
+from __future__ import annotations
+
 import json
 import asyncio
 import anthropic

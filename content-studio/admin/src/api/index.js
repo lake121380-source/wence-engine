@@ -18,7 +18,11 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // /login 与 /init 的 401 是业务响应（密码错误、init token 不对），
+    // 不代表登录态过期，交给调用方展示，否则会把用户莫名踢回登录页。
+    const url = err.config?.url || ''
+    const isAuthEndpoint = url.includes('/login') || url.includes('/init')
+    if (err.response?.status === 401 && !isAuthEndpoint) {
       localStorage.removeItem('admin_token')
       localStorage.removeItem('admin_user')
       window.location.hash = '#/login'
@@ -30,7 +34,10 @@ api.interceptors.response.use(
 export const authApi = {
   login: (data) => api.post('/login', data),
   me: () => api.get('/me'),
-  init: (data) => api.post('/init', data),
+  // 初始化接口要求携带 X-Init-Token，其值须与服务端 ADMIN_INIT_TOKEN 一致；
+  // 仅当系统内尚无任何管理员时才可用。
+  init: (data, initToken) =>
+    api.post('/init', data, { headers: initToken ? { 'X-Init-Token': initToken } : {} }),
   changePassword: (data) => api.post('/change-password', data),
 }
 

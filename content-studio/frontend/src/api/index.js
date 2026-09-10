@@ -172,7 +172,15 @@ export const viewpointsApi = {
 }
 
 export const paymentApi = {
-  createOrder: (data) => api.post('/payment/orders', data),
+  // The key is generated once per checkout session. Reusing it lets the
+  // backend return the original order when a client-side timeout happens
+  // after the provider has already accepted the request.
+  createOrder: (data, idempotencyKey = '') => {
+    const key = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : ''
+    const config = key ? { headers: { 'Idempotency-Key': key } } : undefined
+    return api.post('/payment/orders', data, config)
+  },
+  config: () => api.get('/payment/config'),
   checkOrder: (orderId) => api.get(`/payment/orders/${orderId}`),
   refreshMe: () => api.get('/auth/me'),
   devPay: (orderId) => api.post(`/payment/dev-pay/${orderId}`),

@@ -1,16 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Home from '../views/Home.vue'
-import Creators from '../views/Creators.vue'
-import Documents from '../views/Documents.vue'
-import StyleTemplates from '../views/StyleTemplates.vue'
-import Generate from '../views/Generate.vue'
-import History from '../views/History.vue'
-import Topics from '../views/Topics.vue'
-import Viewpoints from '../views/Viewpoints.vue'
-import Login from '../views/Login.vue'
-import Invite from '../views/Invite.vue'
-import Pricing from '../views/Pricing.vue'
-import Settings from '../views/Settings.vue'
+
+// 按路由懒加载：首屏只下载当前页面，避免把 12 个视图全塞进一个 bundle。
+const Home = () => import('../views/Home.vue')
+const Creators = () => import('../views/Creators.vue')
+const Documents = () => import('../views/Documents.vue')
+const StyleTemplates = () => import('../views/StyleTemplates.vue')
+const Generate = () => import('../views/Generate.vue')
+const History = () => import('../views/History.vue')
+const Topics = () => import('../views/Topics.vue')
+const Viewpoints = () => import('../views/Viewpoints.vue')
+const Login = () => import('../views/Login.vue')
+const Invite = () => import('../views/Invite.vue')
+const Pricing = () => import('../views/Pricing.vue')
+const Settings = () => import('../views/Settings.vue')
 
 const router = createRouter({
   history: createWebHistory(),

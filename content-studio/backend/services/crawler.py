@@ -2,6 +2,8 @@
 博主内容抓取服务
 负责：新增博主 / 定时更新视频列表 / 触发向量索引
 """
+from __future__ import annotations
+
 from datetime import datetime, date
 from sqlalchemy.orm import Session
 from models import Creator, CreatorVideo, TenantCreator

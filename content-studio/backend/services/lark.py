@@ -4,6 +4,8 @@
 - 创建 / 查找多维表格 App 和数据表
 - 批量写入选题数据
 """
+from __future__ import annotations
+
 import httpx
 import time
 from config import settings
