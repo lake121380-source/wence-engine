@@ -1,8 +1,8 @@
-www.wenceai.xyz {
-    redir https://wenceai.xyz{uri} permanent
+www.wence.tongzhuo.ink {
+    redir https://wence.tongzhuo.ink{uri} permanent
 }
 
-wenceai.xyz {
+wence.tongzhuo.ink {
     encode gzip
 
     redir /admin /admin/

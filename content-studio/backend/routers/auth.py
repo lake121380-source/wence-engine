@@ -1,6 +1,8 @@
 """
 认证路由：邮箱注册/登录 + Google OAuth + GitHub OAuth + 微信 + JWT
 """
+from __future__ import annotations
+
 import uuid
 import hashlib
 import secrets
@@ -372,7 +374,11 @@ def send_register_code(body: SendRegisterCodeRequest):
 
 @router.get("/config")
 def auth_config():
-    return {"register_code_required": is_email_service_configured()}
+    return {
+        "register_code_required": is_email_service_configured(),
+        "google_enabled": bool(settings.google_client_id and settings.google_oauth_enabled),
+        "github_enabled": bool(settings.github_client_id),
+    }
 
 
 @router.post("/register")

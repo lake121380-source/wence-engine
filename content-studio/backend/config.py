@@ -34,16 +34,41 @@ class Settings(BaseSettings):
     wechat_appsecret: str = ""
     wechat_token: str = "content_studio"  # 公众号服务器验证 Token
 
-    # YunGouOS 支付
+    # 支付配置。旧 YunGouOS 字段保留读取兼容，不再作为生产适配器。
     yungouos_wxpay_mchid: str = ""         # 微信支付商户号
     yungouos_alipay_mchid: str = ""        # 支付宝商户号
     yungouos_merge_mchid: str = ""         # 聚合支付商户号（一码付）
     yungouos_key: str = ""                 # 商户密钥
     yungouos_notify_url: str = ""          # 支付回调地址（需公网可访问）
+    yungouos_base_url: str = "https://api.pay.yungouos.com/api/pay"
+    payment_http_timeout_seconds: float = 15.0
+    payment_order_expire_minutes: int = 15
+    # 本地回调未及时到达时，订单查询接口可向 GGGUA 做兜底核验。
+    payment_query_fallback: bool = True
+    payment_query_interval_seconds: float = 10.0
+    # 必须同时满足 DEBUG=true 和 PAYMENT_DEV_MODE=true 才允许模拟支付。
+    # 这样即使部署时误把 DEBUG 打开，也不会意外开放免เงินจริง支付。
+    payment_dev_mode: bool = False
+
+    # GGGUA 易支付（https://pay.gggua.com/doc.html）
+    payment_provider: str = "gggua"
+    gggua_pid: str = ""
+    gggua_key: str = ""
+    # GGGUA_BASE_URL 是文档中的公共根地址；gggua_api_base 兼容早期本地配置。
+    gggua_base_url: str = "https://pay.gggua.com"
+    gggua_api_base: str = "https://pay.gggua.com"
+    gggua_notify_url: str = ""
+    gggua_return_url: str = ""
+    # 支付请求中的 clientip。为空时由受信任的反向代理/请求地址推导。
+    gggua_client_ip: str = ""
+    # 逗号分隔的受信任代理地址；不要把任意 X-Forwarded-For 当作用户 IP。
+    payment_trusted_proxy_ips: str = "127.0.0.1,::1"
 
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""
+    # 部署环境访问不到 Google（如境内服务器）时置 false，登录页据此隐藏入口。
+    google_oauth_enabled: bool = True
 
     # GitHub OAuth
     github_client_id: str = ""
@@ -81,7 +106,12 @@ class Settings(BaseSettings):
     # App
     app_name: str = "文策引擎"
     debug: bool = False
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost:5174", "https://wenceai.xyz"]
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:5174",
+        "https://wence.tongzhuo.ink",
+    ]
     frontend_url: str = "http://localhost:5173"
 
     # Public OpenAPI for content generation

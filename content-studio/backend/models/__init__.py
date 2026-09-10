@@ -358,6 +358,14 @@ class Subscription(Base):
 class PaymentOrder(Base):
     """支付订单"""
     __tablename__ = "payment_orders"
+    __table_args__ = (
+        # NULL 幂等键允许普通请求；同一用户传入幂等键时只能对应一个订单。
+        UniqueConstraint("user_id", "idempotency_key", name="uq_payment_order_user_idempotency"),
+        # A provider transaction must never settle two local orders.  NULL is
+        # intentionally allowed for a newly reserved order and for local
+        # development orders before they are marked paid.
+        UniqueConstraint("transaction_id", name="uq_payment_order_transaction_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     order_no = Column(String(64), unique=True, nullable=False, index=True)
@@ -368,8 +376,12 @@ class PaymentOrder(Base):
     status = Column(String(20), default="pending")       # pending / paid / closed / refunded
     pay_url = Column(Text, nullable=True)                # 支付链接 / 二维码 URL
     qr_code_url = Column(Text, nullable=True)            # 微信支付二维码图片
+    qr_payload = Column(Text, nullable=True)             # 供应商返回的二维码 URI（如 weixin://）
+    url_scheme = Column(Text, nullable=True)             # 小程序/客户端专用跳转 scheme
     transaction_id = Column(String(100), nullable=True)  # 第三方支付流水号
     paid_at = Column(DateTime, nullable=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="orders")
